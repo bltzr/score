@@ -59,9 +59,6 @@ set(SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/Application.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Application.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
-
-  "${3RDPARTY_FOLDER}/phantomstyle/src/phantom/phantomcolor.cpp"
-  "${3RDPARTY_FOLDER}/phantomstyle/src/phantom/phantomstyle.cpp"
 )
 
 if(EMSCRIPTEN)
@@ -75,11 +72,10 @@ endif()
 
 ossia_set_visibility(${APPNAME})
 
-target_include_directories(${APPNAME} PRIVATE "${3RDPARTY_FOLDER}/phantomstyle/src")
-
 target_link_libraries(${APPNAME}
   PUBLIC
     score_lib_base
+    phantomstyle
     ${QT_PREFIX}::CorePrivate
 )
 
