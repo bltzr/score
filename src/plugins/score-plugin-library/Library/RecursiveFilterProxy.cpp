@@ -2,6 +2,10 @@
 
 #include "ProcessesItemModel.hpp"
 
+#include <Process/ProcessList.hpp>
+
+#include <score/application/GUIApplicationContext.hpp>
+
 namespace Library
 {
 
@@ -77,6 +81,21 @@ bool ProcessFilterProxy::filterAcceptsRowItself(
   auto model = static_cast<ProcessesItemModel*>(sourceModel());
   auto& node = model->nodeFromModelIndex(index);
 
-  return node.prettyName.contains(m_textPattern, Qt::CaseInsensitive);
+  if(node.prettyName.contains(m_textPattern, Qt::CaseInsensitive))
+    return true;
+
+  // Also match against the process tags, if any.
+  // The factory lookup / descriptor() call only happens when the (cheap) name
+  // check above fails, to keep filtering on large libraries reasonably fast.
+  if(auto f = score::GUIAppContext()
+                  .interfaces<Process::ProcessFactoryList>()
+                  .get(node.key))
+  {
+    for(const QString& tag : f->descriptor(node.customData).tags)
+      if(tag.contains(m_textPattern, Qt::CaseInsensitive))
+        return true;
+  }
+
+  return false;
 }
 }
