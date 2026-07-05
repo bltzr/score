@@ -193,6 +193,8 @@ void ShmdataOutputNode::createOutput(score::gfx::OutputConfiguration conf)
   m_renderState->api = score::gfx::GraphicsApi::OpenGL;
   m_renderState->version = caps.qShaderVersion;
 
+  m_renderState->createNullRhiIfNeeded();
+
   auto rhi = m_renderState->rhi;
   m_texture = rhi->newTexture(
       QRhiTexture::RGBA8, m_renderState->renderSize, 1,

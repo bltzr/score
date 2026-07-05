@@ -66,6 +66,18 @@ struct RenderState
   // Called after QRhi is destroyed to clean up an imported VkDevice
   std::function<void()> customDeviceCleanup;
 
+  // Fall back to the Null backend when no GPU context could be created
+  // (headless / offscreen). No-op if a real RHI is already set.
+  void createNullRhiIfNeeded()
+  {
+    if(rhi)
+      return;
+    QRhiNullInitParams params;
+    rhi = QRhi::create(QRhi::Null, &params, {});
+    api = GraphicsApi::Null;
+    version = QShaderVersion(120);
+  }
+
   void destroy()
   {
     window.reset();
