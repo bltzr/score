@@ -141,6 +141,12 @@ public:
   void setIntervalSpeed(QObject* object, double);
   W_SLOT(setIntervalSpeed)
 
+  void setAutoTrigger(QObject* timeSync, bool);
+  W_SLOT(setAutoTrigger)
+
+  void setProcessLoop(QObject* process, bool);
+  W_SLOT(setProcessLoop)
+
   QObject* port(QObject* obj, QString name);
   W_SLOT(port)
 
@@ -158,6 +164,9 @@ public:
 
   QObject* createCable(QObject* outlet, QObject* inlet);
   W_SLOT(createCable)
+
+  QObject* cable(QObject* outlet, QObject* inlet);
+  W_SLOT(cable)
 
   void setAddress(QObject* obj, QString addr);
   W_SLOT(setAddress)
@@ -281,6 +290,10 @@ public:
 
   QObject* findByLabel(QString p);
   W_SLOT(findByLabel)
+  QString path(QObject* obj);
+  W_SLOT(path)
+  QObject* findByPath(QString path);
+  W_SLOT(findByPath)
 
   QObject* document();
   W_SLOT(document)
