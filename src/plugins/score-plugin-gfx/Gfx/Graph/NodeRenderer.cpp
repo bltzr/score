@@ -61,7 +61,10 @@ void quadRenderPass(
 {
   auto it
       = ossia::find_if(passes, [ptr = &edge](const auto& p) { return p.first == ptr; });
-  SCORE_ASSERT(it != passes.end());
+  // The pass is absent when its pipeline failed to build (buildPipeline returns
+  // null and createPipelines skips it) — transient during graph rebuild. Skip
+  // the draw gracefully, as defaultRenderPass does, instead of asserting.
+  if(it != passes.end())
   {
     const auto sz = renderer.renderSize(&edge);
     cb.setGraphicsPipeline(it->second.pipeline);
@@ -70,6 +73,10 @@ void quadRenderPass(
 
     const auto& mesh = renderer.defaultQuad();
     mesh.draw(bufs, cb);
+  }
+  else
+  {
+    qDebug() << "quadRenderPass: no pipeline for edge (build failed?)";
   }
 }
 
