@@ -812,7 +812,7 @@ endif()
 # consumer against the live daemon across all pixel formats and transports.
 option(SCORE_PIPEWIRE_TESTER "Build the PipeWire video round-trip harness" ON)
 if(SCORE_PIPEWIRE_TESTER
-   AND NOT EMSCRIPTEN AND NOT APPLE AND NOT WIN32
+   AND NOT EMSCRIPTEN AND NOT APPLE AND NOT WIN32 AND NOT SCORE_STATIC_PLUGINS
    AND TARGET pipewire::pipewire)
 add_executable(PipewireRoundtrip tests/PipewireRoundtrip.cpp)
 # pipewire::pipewire is include-only (score dlopens libpipewire); the
@@ -821,8 +821,5 @@ find_library(PIPEWIRE_LIBRARY NAMES pipewire-0.3)
 target_link_libraries(PipewireRoundtrip PRIVATE
   score_plugin_gfx score_plugin_media ${QT_PREFIX}::Gui ${QT_PREFIX}::Widgets
   pipewire::pipewire ${PIPEWIRE_LIBRARY} swscale)
-if(SCORE_STATIC_PLUGINS)
-  target_link_libraries(PipewireRoundtrip PRIVATE ${SCORE_PLUGINS_LIST})
-endif()
 endif()
 
