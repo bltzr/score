@@ -66,6 +66,7 @@ set(HDRS ${HDRS}
 
     "${CMAKE_CURRENT_SOURCE_DIR}/Media/AudioDecoder.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Media/MediaFileHandle.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Media/LibavMediaInfo.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Media/RMSData.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Media/SndfileDecoder.hpp"
 
@@ -121,6 +122,8 @@ set(SRCS
     "${CMAKE_CURRENT_SOURCE_DIR}/Media/MediaFileHandle.mmap.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Media/MediaFileHandle.sndfile.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Media/MediaFileHandle.waveform.cpp"
+
+    "${CMAKE_CURRENT_SOURCE_DIR}/Media/LibavMediaInfo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Media/RMSData.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Media/SndfileDecoder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Media/Tempo.cpp"
@@ -167,7 +170,6 @@ if(EMSCRIPTEN)
     /opt/ossia-sdk-wasm/ffmpeg/lib/libavutil.a
     /opt/ossia-sdk-wasm/ffmpeg/lib/libswscale.a
     /opt/ossia-sdk-wasm/ffmpeg/lib/libswresample.a
-    /opt/ossia-sdk-wasm/ffmpeg/lib/libpostproc.a
     -Wl,--end-group
   )
 elseif(TARGET avcodec)

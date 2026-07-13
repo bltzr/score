@@ -13,7 +13,10 @@
 #include <score/graphics/layouts/GraphicsTabLayout.hpp>
 #include <score/graphics/widgets/QGraphicsLineEdit.hpp>
 
+#include <avnd/common/aggregates.hpp>
 #include <avnd/concepts/layout.hpp>
+
+#include <avnd/common/aggregates.hpp>
 
 namespace oscr
 {
@@ -333,16 +336,19 @@ struct LayoutBuilder final : Process::LayoutBuilderBase
     createdLayouts.push_back(new_l);
 
     {
-      using namespace boost::pfr;
-      using namespace boost::pfr::detail;
-      static constexpr int N = boost::pfr::tuple_size_v<Item>;
-      auto t = boost::pfr::structure_tie(item);
+#if AVND_USE_BOOST_PFR
+      static constexpr int N = avnd::pfr::tuple_size_v<Item>;
+      auto t = avnd::pfr::detail::tie_as_tuple(item);
       [&]<std::size_t... I>(std::index_sequence<I...>) {
         using namespace std;
-        using namespace boost::pfr;
+        using namespace avnd::pfr;
 
         (this->walkLayout(get<I>(t), recursive_members...), ...);
       }(std::make_index_sequence<N>{});
+#else
+      auto&& [... members] = item;
+      (this->walkLayout(members, recursive_members...), ...);
+#endif
     }
 
     layout = old_l;

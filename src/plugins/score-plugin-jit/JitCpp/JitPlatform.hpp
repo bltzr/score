@@ -7,12 +7,15 @@
 #include <QDebug>
 #include <QDir>
 #include <QDirIterator>
+#include <QFileInfo>
+#include <QStringList>
 
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
 
 #if LLVM_VERSION_MAJOR >= 17
 #include <llvm/TargetParser/Host.h>
+#include <llvm/TargetParser/Triple.h>
 #else
 #include <llvm/Support/Host.h>
 #endif
@@ -152,6 +155,14 @@ inline located_sdk locateSDKWithFallback()
   else
     ret.sdk_kind = located_sdk::platform;
 
+  // An explicitly-provided or relocatable SDK (SCORE_JIT_SDK, an AppImage / .app
+  // bundle) can live outside /usr; trust it as official when it actually ships the
+  // deployed score files the addon compiler needs, otherwise prototype and include
+  // resolution wrongly falls back to the build-time source tree (absent at runtime).
+  if(ret.sdk_kind == located_sdk::platform
+     && QDir(QString::fromStdString(ret.path)).exists("lib/cmake/score/prototype.cpp.in"))
+    ret.sdk_kind = located_sdk::official;
+
   {
     QDir dir(QString::fromStdString(ret.path));
     if(!dir.exists())
@@ -174,11 +185,126 @@ inline located_sdk locateSDKWithFallback()
   return ret;
 }
 
+// Locate the SDK's LLVM ORC runtime archive (compiler-rt orc_rt), if shipped.
+// The native ExecutorNativePlatform loads it into the executor to provide native
+// TLS, static-init/atexit scheduling and (COFF) exception-table registration.
+// Name and location vary per platform (liborc_rt.a / liborc_rt_osx.a /
+// liborc_rt-x86_64.a, under llvm/ or llvm-libs/), so search a few candidate roots
+// rather than hard-coding. Returns "" when absent (e.g. Windows-arm64, or an SDK
+// built before orc_rt was shipped) -- callers then keep the non-platform path.
+static inline std::string locateOrcRuntime()
+{
+  if(QString p = qgetenv("SCORE_JIT_ORC_RUNTIME"); !p.isEmpty())
+    return p.toStdString();
+
+  auto sdk = locateSDKWithFallback();
+  if(sdk.path.empty())
+    return {};
+
+  const QString base = QString::fromStdString(sdk.path);
+  const QString parent = QFileInfo(base).absolutePath();
+  const QStringList roots{base,           parent,
+                          parent + "/llvm", parent + "/llvm-libs",
+                          base + "/llvm",   base + "/llvm-libs"};
+  for(const QString& root : roots)
+  {
+    // orc_rt lives under the clang resource dir: <root>/lib/clang/<v>/lib/<t>/.
+    const QString clangLibs = root + "/lib/clang";
+    if(!QDir(clangLibs).exists())
+      continue;
+    QDirIterator it(
+        clangLibs, {"liborc_rt*.a"}, QDir::Files, QDirIterator::Subdirectories);
+    if(it.hasNext())
+      return it.next().toStdString();
+  }
+  return {};
+}
+
+// Locate compiler-rt's builtins archive (libclang_rt.builtins-*.a). clang's driver
+// links it via -rtlib=compiler-rt; the JIT compiles with bare -cc1 (no driver), so
+// builtins such as __udivti3 (128-bit integer division, pulled by fmt and others)
+// are otherwise unresolved. We hand it to ORC as a definition generator. Same
+// search roots as locateOrcRuntime (it lives in the same clang resource dir);
+// prefer the COFF/windows variant. Returns "" when absent.
+static inline std::string locateBuiltinsRuntime()
+{
+  if(QString p = qgetenv("SCORE_JIT_BUILTINS"); !p.isEmpty())
+    return p.toStdString();
+
+  auto sdk = locateSDKWithFallback();
+  if(sdk.path.empty())
+    return {};
+
+  const QString base = QString::fromStdString(sdk.path);
+  const QString parent = QFileInfo(base).absolutePath();
+  const QStringList roots{base,           parent,
+                          parent + "/llvm", parent + "/llvm-libs",
+                          base + "/llvm",   base + "/llvm-libs"};
+  QString fallback;
+  for(const QString& root : roots)
+  {
+    const QString clangLibs = root + "/lib/clang";
+    if(!QDir(clangLibs).exists())
+      continue;
+    QDirIterator it(
+        clangLibs, {"libclang_rt.builtins*.a"}, QDir::Files,
+        QDirIterator::Subdirectories);
+    while(it.hasNext())
+    {
+      const QString f = it.next();
+      if(f.contains("/windows/") || f.contains("\\windows\\"))
+        return f.toStdString(); // prefer the COFF/windows variant
+      if(fallback.isEmpty())
+        fallback = f;
+    }
+  }
+  return fallback.toStdString();
+}
+
 static inline void
 populateCompileOptions(std::vector<std::string>& args, CompilerOptions opts)
 {
   args.push_back("-triple");
-  args.push_back(llvm::sys::getProcessTriple());
+  const std::string processTriple = llvm::sys::getProcessTriple();
+  args.push_back(processTriple);
+
+  // On Windows/COFF the JIT maps the add-on at a high address (the reserved slab)
+  // and must reference far host symbols -- libc++abi RTTI vtables and the EH
+  // personality among them. The small (default) code model emits 32-bit
+  // relocations that truncate at that address, corrupting vtables / type_info and
+  // crashing __dynamic_cast (notably multiple-inheritance / cross-casts during
+  // plugin registration). The large code model uses 64-bit references throughout.
+  // (The JIT TargetMachine also requests Large, but this cc1 module flag is the
+  // authoritative one that actually reaches code generation.)
+  if(llvm::Triple(processTriple).isOSBinFormatCOFF())
+  {
+    args.push_back("-mcmodel=large");
+
+    // Mirror the target flags clang's *driver* injects for x86_64-w64-windows-gnu
+    // that this bare -cc1 invocation would otherwise miss. Without them the add-on
+    // is compiled differently from how score itself was built (score goes through
+    // the driver + bin/*.cfg), which is what makes host symbols fail to resolve:
+    //   -D_UCRT           select the Universal CRT, so printf/fprintf bind to the
+    //                     UCRT (__stdio_common_vfprintf -- which score imports)
+    //                     instead of legacy-msvcrt mingw ANSI stdio
+    //                     (__mingw_printf / __mingw_fprintf, absent from score).
+    //   -fno-use-init-array  COFF static ctors emit into .ctors (which
+    //                     MinGWCOFFPlatform collects), not .init_array.
+    //   -funwind-tables=2 / -fno-sized-deallocation  match the driver's SEH
+    //                     unwind-table emission and operator-delete ABI.
+    args.push_back("-D_UCRT");
+    // The JIT unconditionally passes -D_GNU_SOURCE=1 (below) for POSIX features on
+    // Linux add-ons; score itself does not define it. On mingw, _GNU_SOURCE flips
+    // __USE_MINGW_ANSI_STDIO to 1 (an independent term of that decision, so _UCRT
+    // alone doesn't undo it), which routes printf/fprintf to legacy-msvcrt
+    // __mingw_printf / __mingw_fprintf -- symbols score (UCRT) doesn't contain.
+    // Force the UCRT stdio path so the add-on binds the same printf family score
+    // does (__stdio_common_vfprintf), resolvable from the host process.
+    args.push_back("-D__USE_MINGW_ANSI_STDIO=0");
+    args.push_back("-fno-use-init-array");
+    args.push_back("-funwind-tables=2");
+    args.push_back("-fno-sized-deallocation");
+  }
 
   args.push_back("-target-cpu");
   args.push_back(llvm::sys::getHostCPUName().lower());
@@ -201,7 +327,13 @@ populateCompileOptions(std::vector<std::string>& args, CompilerOptions opts)
     }
   }
 
-  args.push_back("-std=c++23");
+  // Match the dialect score itself is built with (gnu++23, not strict c++23):
+  // avnd/halp/ossia rely on GNU extensions (anonymous structs/unions, etc.) that
+  // strict -std=c++23 (__STRICT_ANSI__) rejects or types differently, which makes
+  // some nodes that build fine in score fail to compile in the JIT (e.g. curve
+  // controls: the curve_segment concept then isn't satisfied and make_segment has
+  // no viable overload).
+  args.push_back("-std=gnu++23");
   args.push_back("-disable-free");
   args.push_back("-fdeprecated-macro");
   args.push_back("-fmath-errno");
@@ -249,6 +381,24 @@ populateCompileOptions(std::vector<std::string>& args, CompilerOptions opts)
 
 #if defined(__APPLE__)
   args.push_back("-fmax-type-align=16");
+
+  // Apple framework headers (CoreGraphics, ImageIO, Metadata, ...) declare
+  // block-typed parameters (`void (^)(...)`), the Apple "blocks" extension. The
+  // JIT pulls them in transitively, so enable blocks or every such declaration is
+  // a hard error ("blocks support disabled - compile with -fblocks"). We only
+  // parse these signatures; the add-on does not invoke them, so no blocks runtime
+  // is needed.
+  args.push_back("-fblocks");
+
+  // Apple's CoreFoundation CF_ENUM / CF_OPTIONS macros expand (when the fixed
+  // underlying type is available, as in C++) to a non-defining fixed-underlying-
+  // type enum embedded in a typedef, e.g. `typedef enum E : long E; enum E : long
+  // {...};`. That form is only valid in Objective-C(++) where objc_fixed_enum is
+  // a feature; in plain C++23 clang rejects it as -Welaborated-enum-base. The JIT
+  // compiles the addon as C++ but pulls these headers in transitively (Qt, ossia),
+  // so accept the Apple idiom as the extension it is. clang still assigns the enum
+  // its correct fixed-type values.
+  args.push_back("-Wno-elaborated-enum-base");
 #endif
   args.push_back("-mrelocation-model");
   args.push_back("pic");
@@ -261,9 +411,26 @@ populateCompileOptions(std::vector<std::string>& args, CompilerOptions opts)
 
   args.push_back("-fvisibility-inlines-hidden");
 
-  // // tls:
-  args.push_back("-ftls-model=local-exec");
-  args.push_back("-femulated-tls");
+  // TLS: when an Orc Platform (orc_rt) drives the executor we get *native*
+  // thread-locals on every target, and TargetOptions.EmulatedTLS is set false
+  // (see Compiler.cpp). In that case we must NOT force emulated TLS here: codegen
+  // would emit __emutls_* references the platform does not provide. Only request
+  // emulated/local-exec TLS on the legacy (no-orc_rt) path. This mirrors
+  // useNativePlatform in Compiler.cpp (same locateOrcRuntime() result).
+#if LLVM_VERSION_MAJOR >= 22
+  const bool useNativePlatform = !locateOrcRuntime().empty();
+#else
+  const bool useNativePlatform = false;
+#endif
+  // COFF has no JIT-usable native TLS (no _tls_index / .tls directory), so force
+  // emulated TLS there even with the platform on -- matching TargetOptions in
+  // Compiler.cpp. __emutls_get_address resolves from the compiler-rt builtins
+  // archive in the add-on link order.
+  if(!useNativePlatform || llvm::Triple(processTriple).isOSBinFormatCOFF())
+  {
+    args.push_back("-ftls-model=local-exec");
+    args.push_back("-femulated-tls");
+  }
 
   // if fsanitize:
   args.push_back("-mrelax-all");
@@ -348,6 +515,15 @@ static inline void populateDefinitions(std::vector<std::string>& args)
 #endif
 #if defined(FMT_SHARED)
   args.push_back("-DFMT_SHARED=" XSTR(FMT_SHARED));
+#endif
+  // score/libossia link fmt as header-only in deployment builds (see
+  // libossia/cmake/deps/fmt.cmake), so fmt's functions are inlined into score and
+  // no fmt archive/symbols are exported. An add-on compiled WITHOUT
+  // FMT_HEADER_ONLY emits external references (e.g. fmt::vprint) that the host
+  // cannot resolve -- JIT load then fails with "Symbols not found: fmt::...".
+  // Propagate the same mode score itself was built with so the add-on inlines fmt.
+#if defined(FMT_HEADER_ONLY)
+  args.push_back("-DFMT_HEADER_ONLY=" XSTR(FMT_HEADER_ONLY));
 #endif
 #if defined(FMT_STATIC_THOUSANDS_SEPARATOR)
   args.push_back(
@@ -668,6 +844,22 @@ static inline void populateIncludeDirs(std::vector<std::string>& args)
   args.push_back(sdk + "/include/c++/v1");
 #endif
 
+  // libc++'s per-target __config_site lives at include/<triple>/c++/v1 (multiarch
+  // layout) and is #include'd by the main libc++ headers, so that dir must also be
+  // on the search path.
+  {
+    const QDir incdir(qsdk + "/include");
+    for(const auto& d : incdir.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+    {
+      if(QFileInfo::exists(qsdk + "/include/" + d + "/c++/v1/__config_site"))
+      {
+        args.push_back("-internal-isystem");
+        args.push_back(sdk + "/include/" + d.toStdString() + "/c++/v1");
+        break;
+      }
+    }
+  }
+
 #elif defined(_GLIBCXX_RELEASE)
   // Try to locate the correct libstdc++ folder
   // TODO these are only heuristics. how to make them better ?
@@ -719,6 +911,15 @@ static inline void populateIncludeDirs(std::vector<std::string>& args)
   args.push_back(sdk + "/lib/clang/" + llvm_lib_version + "/include");
   args.push_back("-internal-externc-isystem");
   args.push_back(sdk + "/include");
+#endif
+
+#if defined(__APPLE__)
+  // macOS framework headers are bundled flat in the SDK under include/macos-sdks
+  // (e.g. macos-sdks/ApplicationServices/ApplicationServices.h). In -cc1 mode no
+  // default framework path is added, so addons that transitively include a system
+  // framework (e.g. ApplicationServices via score/tools/Cursor.hpp) need this.
+  if(QFileInfo{qsdk + "/include/macos-sdks"}.isDir())
+    args.push_back("-isystem" + sdk + "/include/macos-sdks");
 #endif
 
   // -resource-dir

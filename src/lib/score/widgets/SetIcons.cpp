@@ -14,8 +14,15 @@
 #include <QFile>
 #include <QGuiApplication>
 #include <QScreen>
+// QtSvg is an optional Qt module (see src/lib/CMakeLists.txt). Guard on the
+// header so score still builds against a Qt without it (e.g. a minimal wasm SDK).
+#if __has_include(<QSvgRenderer>)
 #include <QSvgRenderer>
 #include <QtSvg>
+#define SCORE_HAS_QTSVG 1
+#else
+#define SCORE_HAS_QTSVG 0
+#endif
 
 namespace std
 {
@@ -207,6 +214,7 @@ static void init_svgmap()
 
 static QPixmap render_svg(const QString& svg, double scaleFactor)
 {
+#if SCORE_HAS_QTSVG
   QSvgRenderer renderer{svg};
 
   QSize baseSize = renderer.defaultSize();
@@ -222,10 +230,14 @@ static QPixmap render_svg(const QString& svg, double scaleFactor)
   img.setDevicePixelRatio(scaleFactor);
 
   return img;
+#else
+  return {};
+#endif
 }
 
 static QImage render_svg_image(const QString& svg, double scaleFactor)
 {
+#if SCORE_HAS_QTSVG
   QSvgRenderer renderer{svg};
 
   QSize baseSize = renderer.defaultSize();
@@ -241,6 +253,9 @@ static QImage render_svg_image(const QString& svg, double scaleFactor)
   img.setDevicePixelRatio(scaleFactor);
 
   return img;
+#else
+  return {};
+#endif
 }
 
 QPixmap get_pixmap(QString str, QString svg)
@@ -302,17 +317,20 @@ QCursor get_cursor(QString str, double hotspot_x, double hotspot_y)
     newstr.replace(".png", "@2x.png", Qt::CaseInsensitive);
     if(QFile::exists(newstr))
     {
-      img.setDevicePixelRatio(2.);
-      hotspot_x *= 2.;
-      hotspot_y *= 2.;
       str = newstr;
+      img.load(str);
+      img.setDevicePixelRatio(2.);
     }
     else
     {
       qDebug() << "hidpi pixmap not found: " << newstr;
+      img.load(str);
     }
   }
-  img.load(str);
+  else
+  {
+    img.load(str);
+  }
   cur = QCursor{img, (int)hotspot_x, (int)hotspot_y};
   return cur;
 }

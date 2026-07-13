@@ -218,6 +218,12 @@ set(HDRS
     Gfx/Graph/encoders/UYVY.hpp
     Gfx/Graph/encoders/NV12.hpp
     Gfx/Graph/encoders/I420.hpp
+    Gfx/Graph/encoders/BGRA.hpp
+    Gfx/Graph/encoders/V210.hpp
+    Gfx/Graph/encoders/V210Compute.hpp
+    Gfx/Graph/encoders/UYVYCompute.hpp
+    Gfx/Graph/encoders/BGRACompute.hpp
+    Gfx/Graph/encoders/ComputeEncoder.hpp
 
     Gfx/Graph/decoders/GPUVideoDecoder.hpp
     Gfx/Graph/decoders/GPUVideoDecoderFactory.hpp
@@ -240,6 +246,7 @@ set(HDRS
     Gfx/Graph/decoders/P210.hpp
     Gfx/Graph/decoders/P410.hpp
     Gfx/Graph/decoders/RGBA.hpp
+    Gfx/Graph/decoders/V210.hpp
     Gfx/Graph/decoders/VUYA.hpp
     Gfx/Graph/decoders/Y210.hpp
     Gfx/Graph/decoders/YUV420.hpp
@@ -563,6 +570,13 @@ if(SCORE_HAS_SPOUT)
 endif()
 
 if(WIN32)
+  # Qt's static qrhid3d12_p.h #includes D3D12MemAlloc.h, but the static Qt install
+  # does not ship that 3rdparty header. Provide our vendored copy on the include
+  # path for every Windows build (previously this only happened via SCORE_HAS_SPOUT,
+  # so arm64 -- where Spout is off -- failed with 'D3D12MemAlloc.h not found').
+  # The allocator symbols come from static Qt, so we don't compile the .cpp here.
+  target_include_directories(${PROJECT_NAME} PRIVATE "${3RDPARTY_FOLDER}/D3D12MemoryAllocator")
+
   target_sources(${PROJECT_NAME} PRIVATE Gfx/CameraDevice.win32.cpp)
 
   set_source_files_properties(

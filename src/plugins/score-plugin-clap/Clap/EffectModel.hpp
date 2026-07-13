@@ -9,6 +9,7 @@
 #include <score/serialization/DataStreamVisitor.hpp>
 #include <score/serialization/JSONVisitor.hpp>
 
+#include <ossia/detail/flat_map.hpp>
 #include <ossia/detail/hash_map.hpp>
 
 #include <QSocketNotifier>
@@ -53,7 +54,7 @@ struct PluginHandle
   const clap_plugin_t* plugin{};
   const clap_plugin_descriptor_t* desc{};
 
-  clap_host_t host;
+  clap_host_t host{};
 
   // Common plugin extensions
   const clap_plugin_params_t* ext_params{};
@@ -66,6 +67,8 @@ struct PluginHandle
   std::vector<clap_audio_port_info_t> m_audio_outs;
   std::vector<clap_note_port_info_t> m_midi_ins;
   std::vector<clap_note_port_info_t> m_midi_outs;
+
+  ossia::flat_map<clap_id, std::uint32_t> param_outs_by_id;
 
   QPointer<Model> model;
 
@@ -157,15 +160,38 @@ public:
 
   bool currentlyReadingValues{};
 
+  struct GestureState
+  {
+    QTimer* endTimer{};
+    bool active{};
+    void* cookie{};
+  };
+  ossia::hash_map<clap_id, GestureState> gestures;
+
+  void markStateDirty();
+  void stateSnapshotChanged(const QByteArray& blob)
+      W_SIGNAL(stateSnapshotChanged, blob);
+
+  void onParamRescan(clap_param_rescan_flags flags);
+
 private:
   void loadPlugin();
   void createControls(bool loading);
+
+  void refreshParamValues();
+  // Returns false on structural mismatch — caller should treat as RESCAN_ALL.
+  bool refreshParamInfoIfStable();
   void setupControlInlet(
       const clap_plugin_params_t&, const clap_param_info_t& info, int index,
       Process::ControlInlet* ctl);
   void setupControlOutlet(
       const clap_plugin_params_t&, const clap_param_info_t& info, int index,
       Process::ControlOutlet* ctl);
+
+  void sendParamChange(const clap_param_info_t& info, double value);
+  void endGesture(clap_id param_id, void* cookie);
+
+  QTimer* m_stateDirtyTimer{};
 
   QString m_pluginPath;
   QString m_pluginId;
@@ -174,6 +200,8 @@ private:
   QByteArray m_loadedState;
 
   bool m_supports64{};
+
+  clap_param_rescan_flags m_pendingRescanFlags{};
 };
 }
 

@@ -1,0 +1,413 @@
+# ossia 3rd-party dependency registry.
+#
+# Consumed by Renovate's customManagers (see renovate.json5).
+# Renovate uses RE2 regex (no lookahead / lookbehind), so each entry is
+# either two or three consecutive lines that one customManager matches:
+#
+#   - name: <human-label>
+#     upstream: <owner/repo>            # or "gitlab:owner/repo" for GitLab
+#     upstream_version: "<tag>"         # → github-tags / gitlab-tags
+#
+# For repos with no proper release tags, use `upstream_sha:`:
+#
+#   - name: <human-label>
+#     upstream: <owner/repo>
+#     upstream_sha: "<12-hex>"          # → git-refs (tracks branch HEAD)
+#
+# Entries with only the first two lines are inert — a manifest of what's
+# vendored, but Renovate skips them.
+
+deps:
+
+# ======================================================================
+# score/3rdparty   —   submodules tracked at the top-level score repo
+# ======================================================================
+
+# --- forks we maintain (carry local patches) --------------------------
+
+  - name: QProgressIndicator
+    upstream: QSL/QProgressIndicator
+    upstream_version: "1.0.2"
+
+  - name: Qt-Color-Widgets
+    upstream: mbasaglia/Qt-Color-Widgets
+    upstream_sha: "9613f3fb7210"
+
+  - name: phantomstyle
+    upstream: randrew/phantomstyle
+    upstream_sha: "309c97a955f6"
+
+  - name: QCodeEditor
+    upstream: Megaxela/QCodeEditor
+    upstream_sha: "dc644d41b689"
+
+  - name: vst3_public_sdk
+    upstream: steinbergmedia/vst3_public_sdk
+    upstream_version: "v3.8.0_build_66"
+
+  - name: vst3_pluginterfaces
+    upstream: steinbergmedia/vst3_pluginterfaces
+    upstream_version: "v3.8.0_build_66"
+
+  - name: vst3_cmake
+    upstream: steinbergmedia/vst3_cmake
+    upstream_version: "v3.8.0_build_66"
+
+  - name: libpd
+    upstream: libpd/libpd
+    upstream_version: "0.15.0"
+
+  - name: snappy
+    upstream: google/snappy
+    upstream_version: "1.2.2"
+
+  - name: libsndfile
+    upstream: libsndfile/libsndfile
+    upstream_version: "1.2.2"
+
+  - name: Gist
+    upstream: adamstark/Gist
+    upstream_version: "1.0.7"
+
+  - name: Syphon-Framework
+    upstream: Syphon/Syphon-Framework
+    upstream_version: "5"
+
+  - name: DSPFilters
+    upstream: olilarkin/DSPFilters
+    upstream_sha: "b0688e6417a4"
+
+  - name: Aether
+    upstream: Dougal-s/Aether
+    upstream_version: "v1.2.1"
+
+
+# --- direct-upstream submodules (no fork) -----------------------------
+
+  - name: vst3_base
+    upstream: steinbergmedia/vst3_base
+    upstream_version: "v3.8.0_build_66"
+
+  - name: libossia
+    upstream: ossia/libossia
+
+  - name: hap
+    upstream: Vidvox/hap
+    upstream_sha: "d847f6bbd3be"
+
+  - name: shmdata
+    upstream: "gitlab:sat-metalab/shmdata"
+    upstream_version: "1.3.74"
+
+  - name: avendish
+    upstream: celtera/avendish
+    upstream_version: "v3.1"
+
+  - name: llfio
+    upstream: ned14/llfio
+    upstream_version: "20260506"
+
+  - name: quickcpplib
+    upstream: ned14/quickcpplib
+    upstream_sha: "9e75ac18694b"
+
+  - name: outcome
+    upstream: ned14/outcome
+    upstream_version: "v2.2.15"
+
+  - name: Gamma
+    upstream: LancePutnam/Gamma
+    upstream_version: "0.9.8"
+
+  - name: doxygen-bootstrapped
+    upstream: Velron/doxygen-bootstrapped
+    upstream_version: "v1.2.3"
+
+  - name: flatpak-shared-modules
+    upstream: flathub/shared-modules
+    upstream_sha: "c57634787a59"
+
+  - name: sh4lt
+    upstream: "gitlab:sh4lt/sh4lt"
+    upstream_version: "0.3.2"
+
+  - name: snmalloc
+    upstream: microsoft/snmalloc
+    upstream_version: "0.7.4"
+
+  - name: vcglib
+    upstream: cnr-isti-vclab/vcglib
+    upstream_version: "2025.07"
+
+  - name: eigen
+    upstream: "gitlab:libeigen/eigen"
+    upstream_version: "5.0.1"
+
+  - name: miniply
+    upstream: vilya/miniply
+    upstream_sha: "1a235c70390f"
+
+  - name: suil
+    upstream: lv2/suil
+    upstream_version: "v0.10.26"
+
+  - name: clap
+    upstream: free-audio/clap
+    upstream_version: "1.2.8"
+
+  - name: xtensor
+    upstream: xtensor-stack/xtensor
+    upstream_version: "0.27.1"
+
+  - name: xsimd
+    upstream: xtensor-stack/xsimd
+    upstream_version: "14.2.0"
+
+  - name: xtl
+    upstream: xtensor-stack/xtl
+    upstream_version: "0.8.2"
+
+  - name: opengametools
+    upstream: jpaver/opengametools
+    upstream_version: "opengametools-v0.0.2-alpha"
+
+
+# --- jcelerier/ossia originals (we are upstream) -----------------------
+
+  - name: zipdownloader
+    upstream: jcelerier/zipdownloader
+
+  - name: magicitems
+    upstream: jcelerier/magicitems
+
+  - name: libssynth
+    upstream: jcelerier/libssynth
+
+
+# --- vendored copies (no submodule) -----------------------------------
+
+  - name: D3D12MemoryAllocator
+    upstream: GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator
+    upstream_version: "v3.1.0"
+
+  - name: Guitarix
+    upstream: brummer10/guitarix
+    upstream_version: "V0.47.0"
+
+  - name: QMenuView
+    upstream: "(XINX, CeCILL)"
+
+  - name: STK
+    upstream: thestk/stk
+    upstream_version: "5.0.1"
+
+  - name: Spout
+    upstream: leadedge/Spout2
+    upstream_version: "2.007.017"
+
+  - name: csv2
+    upstream: p-ranav/csv2
+
+  - name: dxv
+    upstream: "(ffmpeg dxv decoder, hand-ported)"
+
+  - name: glsl-parser
+    upstream: graphitemaster/glsl-parser
+
+  - name: libsimpleio
+    upstream: "(Munts Technologies)"
+
+  - name: mikktspace
+    upstream: "(Morten S. Mikkelsen, public domain)"
+
+  - name: tiny_obj_loader
+    upstream: tinyobjloader/tinyobjloader
+    upstream_version: "v2.0.0rc13"
+
+
+# ======================================================================
+# libossia/3rdparty   —   submodules tracked at the libossia repo
+# ======================================================================
+
+# --- forks we maintain (carry local patches) --------------------------
+
+  - name: oscpack
+    upstream: svn2github/oscpack
+    upstream_sha: "10392376a3ff"
+
+  - name: nano-signal-slot
+    upstream: NoAvailableAlias/nano-signal-slot
+    upstream_version: "v2.0.1"
+
+  - name: rapidjson
+    upstream: Tencent/rapidjson
+    upstream_version: "v1.1.0"
+
+  - name: websocketpp
+    upstream: zaphoyd/websocketpp
+    upstream_version: "0.8.2"
+
+  - name: Servus
+    upstream: HBPVIS/Servus
+    upstream_version: "1.5.2"
+
+  - name: whereami
+    upstream: gpakosz/whereami
+    upstream_sha: "dcb52a058dc1"
+
+  - name: SmallFunction
+    upstream: LoopPerfect/smallfunction
+    upstream_sha: "04d6a1d2cdda"
+
+  - name: verdigris
+    upstream: woboq/verdigris
+    upstream_version: "v1.3"
+
+  - name: weakjack
+    upstream: x42/weakjack
+    upstream_sha: "61389602c521"
+
+  - name: concurrentqueue
+    upstream: cameron314/concurrentqueue
+    upstream_version: "v1.0.5"
+
+  - name: rubberband
+    upstream: breakfastquay/rubberband
+    upstream_version: "v4.0.0"
+
+  - name: libsamplerate
+    upstream: libsndfile/libsamplerate
+    upstream_version: "0.2.2"
+
+  - name: tuplet
+    upstream: codeinred/tuplet
+    upstream_version: "v2.1.1"
+
+  - name: kfr
+    upstream: kfrlib/kfr
+    upstream_version: "7.0.1"
+
+  - name: PerlinNoise
+    upstream: Reputeless/PerlinNoise
+    upstream_version: "v3.0.0"
+
+  - name: unordered_dense
+    upstream: martinus/unordered_dense
+    upstream_version: "v4.8.1"
+
+  - name: max-sdk
+    upstream: Cycling74/max-sdk
+    upstream_version: "v8.2.0"
+
+  - name: wiiuse
+    upstream: wiiuse/wiiuse
+    upstream_version: "0.15.7"
+
+  - name: ios-cmake
+    upstream: leetal/ios-cmake
+    upstream_version: "4.5.0"
+
+
+# --- direct-upstream submodules (no fork) -----------------------------
+
+  - name: spdlog
+    upstream: gabime/spdlog
+    upstream_version: "v1.17.0"
+
+  - name: fmt
+    upstream: fmtlib/fmt
+    upstream_version: "12.1.0"
+
+  - name: readerwriterqueue
+    upstream: cameron314/readerwriterqueue
+    upstream_version: "v1.0.7"
+
+  - name: pybind11
+    upstream: pybind/pybind11
+    upstream_version: "v3.0.4"
+
+  - name: exprtk
+    upstream: ArashPartow/exprtk
+    upstream_version: "0.0.3"
+
+  - name: dr_libs
+    upstream: mackron/dr_libs
+    upstream_version: "wav-0.14.5"
+
+  - name: r8brain-free-src
+    upstream: avaneev/r8brain-free-src
+    upstream_version: "version-6.5"
+
+  - name: Flicks
+    upstream: OculusVR/Flicks
+    upstream_sha: "6d6362fb77e7"
+
+  - name: rapidfuzz-cpp
+    upstream: maxbachmann/rapidfuzz-cpp
+    upstream_version: "v3.3.3"
+
+  - name: Catch2
+    upstream: catchorg/Catch2
+    upstream_version: "v3.15.0"
+
+  - name: mdspan
+    upstream: kokkos/mdspan
+    upstream_version: "mdspan-0.6.0"
+
+  - name: dno
+    upstream: thibaudk/dno
+    upstream_sha: "2c5ea419d289"
+
+  - name: span
+    upstream: tcbrindle/span
+    upstream_sha: "836dc6a0efd9"
+
+  - name: re2
+    upstream: google/re2
+    upstream_version: "2025-11-05"
+
+  - name: compile-time-regular-expressions
+    upstream: hanickadot/compile-time-regular-expressions
+    upstream_version: "v3.11.0"
+
+  - name: async-mqtt5
+    upstream: mireo/async-mqtt5
+    upstream_version: "v1.0.3"
+
+  - name: magic_enum
+    upstream: Neargye/magic_enum
+    upstream_version: "v0.9.8"
+
+  - name: miniaudio
+    upstream: mackron/miniaudio
+    upstream_version: "0.11.25"
+
+  - name: libcoap
+    upstream: obgm/libcoap
+    upstream_version: "v4.3.5"
+
+
+# --- jcelerier/ossia originals (we are upstream) ----------------------
+
+  - name: libremidi
+    upstream: jcelerier/libremidi
+    upstream_version: "v5.4.3"
+
+  - name: rnd
+    upstream: jcelerier/rnd
+
+  - name: cmake-modules
+    upstream: OSSIA/cmake-modules
+
+
+# --- vendored copies (no submodule) -----------------------------------
+
+  - name: libe131
+    upstream: hhromic/libe131
+    upstream_version: "v1.4.0"
+
+  - name: timertt
+    upstream: stiffstream/timertt
+
+  - name: zita-alsa-pcmi
+    upstream: "(Fons Adriaensen / Ardour fork)"

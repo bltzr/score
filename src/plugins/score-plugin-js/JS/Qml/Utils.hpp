@@ -32,8 +32,27 @@ public:
   void writeFile(QString path, QByteArray content);
   W_SLOT(writeFile)
 
+  // Absolute paths of the files in a directory matching the given glob filters
+  // (e.g. "*.scp" or "*.scp;*.json"; empty = all files). Empty if the directory
+  // does not exist. <LIBRARY>:/<PROJECT>: paths are resolved like readFile.
+  QStringList listFiles(QString path, QString filters);
+  W_SLOT(listFiles)
+  // Absolute paths of the immediate sub-directories of a directory.
+  QStringList listDirectories(QString path);
+  W_SLOT(listDirectories)
+
   void shell(QString cmd, QJSValue onFinish);
   W_SLOT(shell)
+
+  // Native, asynchronous file dialogs usable from any Qt Quick app.
+  // onAccept is a JS callback invoked with the chosen path (empty string if
+  // the dialog was cancelled). The dialog never blocks the QML thread.
+  void openFileDialog(QString title, QString filters, QString folder, QJSValue onAccept);
+  W_SLOT(openFileDialog)
+  void saveFileDialog(
+      QString title, QString filters, QString folder, QString defaultName,
+      QJSValue onAccept);
+  W_SLOT(saveFileDialog)
 
   QString layoutTextLines(QString text, QString font, int pointSize, int maxWidth);
   W_SLOT(layoutTextLines)

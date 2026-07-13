@@ -10,8 +10,11 @@
 #include <ossia/detail/algorithms.hpp>
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QFontMetrics>
+#include <QMainWindow>
 #include <QProcess>
 #include <QImageReader>
 #include <QUrl>
@@ -87,6 +90,45 @@ void JsUtils::writeFile(QString path, QByteArray content)
     f.write(content);
 }
 
+QStringList JsUtils::listFiles(QString path, QString filters)
+{
+  if(auto doc = score::AppContext().currentDocument())
+    path = score::locateFilePath(path, *doc);
+
+  QDir dir(path);
+  if(!dir.exists())
+    return {};
+
+  QStringList nameFilters;
+  if(!filters.isEmpty())
+    nameFilters = filters.split(';', Qt::SkipEmptyParts);
+
+  QStringList res;
+  const auto entries = dir.entryInfoList(nameFilters, QDir::Files, QDir::Name);
+  res.reserve(entries.size());
+  for(const auto& fi : entries)
+    res.push_back(fi.absoluteFilePath());
+  return res;
+}
+
+QStringList JsUtils::listDirectories(QString path)
+{
+  if(auto doc = score::AppContext().currentDocument())
+    path = score::locateFilePath(path, *doc);
+
+  QDir dir(path);
+  if(!dir.exists())
+    return {};
+
+  QStringList res;
+  const auto entries
+      = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+  res.reserve(entries.size());
+  for(const auto& fi : entries)
+    res.push_back(fi.absoluteFilePath());
+  return res;
+}
+
 void JsUtils::shell(QString cmd, QJSValue onFinish)
 {
 #if QT_CONFIG(process)
@@ -132,6 +174,54 @@ void JsUtils::shell(QString cmd, QJSValue onFinish)
   });
   //Util.shell("echo toto", (code, stdout, stderr) => { console.log(code, stdout, stderr); })
 #endif
+}
+
+// Async native dialogs. We use the QWidget QFileDialog in non-blocking mode
+// (open() + finished signal) rather than the blocking static helpers, so the
+// Qt Quick render/event loop keeps running while the native picker is shown.
+// The dialog deletes itself on close; the callback always fires (empty path on
+// cancel). Everything here runs on the GUI thread, so the QJSValue can be
+// called back directly without thread marshalling.
+static void runFileDialog(
+    QFileDialog* dialog, std::shared_ptr<QJSValue> onAccept)
+{
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  QObject::connect(
+      dialog, &QFileDialog::finished, dialog, [dialog, onAccept](int result) {
+    QString path;
+    if(result == QDialog::Accepted)
+    {
+      const auto files = dialog->selectedFiles();
+      if(!files.isEmpty())
+        path = files.front();
+    }
+    if(onAccept->isCallable())
+      onAccept->call(QJSValueList{} << path);
+  });
+  dialog->open();
+}
+
+void JsUtils::openFileDialog(
+    QString title, QString filters, QString folder, QJSValue onAccept)
+{
+  auto* parent = score::GUIAppContext().mainWindow;
+  auto* dialog = new QFileDialog(parent, title, folder, filters);
+  dialog->setAcceptMode(QFileDialog::AcceptOpen);
+  dialog->setFileMode(QFileDialog::ExistingFile);
+  runFileDialog(dialog, std::make_shared<QJSValue>(std::move(onAccept)));
+}
+
+void JsUtils::saveFileDialog(
+    QString title, QString filters, QString folder, QString defaultName,
+    QJSValue onAccept)
+{
+  auto* parent = score::GUIAppContext().mainWindow;
+  auto* dialog = new QFileDialog(parent, title, folder, filters);
+  dialog->setAcceptMode(QFileDialog::AcceptSave);
+  dialog->setFileMode(QFileDialog::AnyFile);
+  if(!defaultName.isEmpty())
+    dialog->selectFile(defaultName);
+  runFileDialog(dialog, std::make_shared<QJSValue>(std::move(onAccept)));
 }
 
 QString JsUtils::layoutTextLines(QString text, QString font, int pointSize, int maxWidth)

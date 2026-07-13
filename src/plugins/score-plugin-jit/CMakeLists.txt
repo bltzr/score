@@ -74,6 +74,7 @@ set(HDRS
     JitCpp/MetadataGenerator.hpp
     JitCpp/Compiler/Compiler.hpp
     JitCpp/Compiler/Driver.hpp
+    JitCpp/Compiler/MinGWCOFFPlatform.hpp
 
     Bytebeat/Bytebeat.hpp
 
@@ -82,6 +83,7 @@ set(HDRS
 
 set(SRCS
     JitCpp/Compiler/Compiler.cpp
+    JitCpp/Compiler/MinGWCOFFPlatform.cpp
     JitCpp/AddonCompiler.cpp
     JitCpp/JitModel.cpp
     JitCpp/ApplicationPlugin.cpp
@@ -94,6 +96,14 @@ set(SRCS
     # which we have to #undef, which can break unity builds
     JitCpp/ClangDriver.cpp
 )
+
+# MinGWCOFFPlatform.cpp includes llvm/BinaryFormat/COFF.h, whose SectionCharacteristics
+# enum collides with <windows.h>'s IMAGE_SCN_* macros. In a unity build it can be
+# concatenated after a sibling that pulls in <windows.h>, breaking COFF.h. Compile
+# it on its own so its include order is self-contained.
+set_source_files_properties(
+    JitCpp/Compiler/MinGWCOFFPlatform.cpp
+    PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 
 add_library(${PROJECT_NAME} ${SRCS} ${HDRS})
 if(TARGET score_plugin_gfx)

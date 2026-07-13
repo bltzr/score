@@ -286,7 +286,7 @@ struct SCORE_PLUGIN_AVND_EXPORT CustomGfxOutputNodeBase : score::gfx::OutputNode
   score::gfx::Message last_message;
   void process(score::gfx::Message&& msg) override;
 };
-struct CustomGpuNodeBase
+struct SCORE_PLUGIN_AVND_EXPORT CustomGpuNodeBase
     : score::gfx::Node
     , GpuWorker
     , GpuControlIns
@@ -459,9 +459,25 @@ struct port_to_type_enum
   {
     using value_type = std::remove_cvref_t<decltype(F::value)>;
 
-    if constexpr(std::is_aggregate_v<value_type>)
+    if constexpr(std::is_array_v<value_type>)
     {
-      constexpr int sz = boost::pfr::tuple_size_v<value_type>;
+      static constexpr int sz = sizeof(value_type) / sizeof(value_type{}[0]);
+      if constexpr(sz == 2)
+      {
+        return score::gfx::Types::Vec2;
+      }
+      else if constexpr(sz == 3)
+      {
+        return score::gfx::Types::Vec3;
+      }
+      else if constexpr(sz == 4)
+      {
+        return score::gfx::Types::Vec4;
+      }
+    }
+    else if constexpr(std::is_aggregate_v<value_type>)
+    {
+      static constexpr int sz = avnd::pfr::tuple_size_v<value_type>;
       if constexpr(sz == 2)
       {
         return score::gfx::Types::Vec2;

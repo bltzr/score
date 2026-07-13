@@ -14,9 +14,7 @@
 #endif
 
 // https://github.com/ned14/llfio/issues/144
-#if __has_include(<llfio.hpp>) \
-  && !defined(_WIN32) \
-  && !defined(__EMSCRIPTEN__)
+#if __has_include(<llfio.hpp>) && !defined(__EMSCRIPTEN__)
 #define SCORE_HAS_LLFIO 1
 #elif defined(__APPLE__)
 #if __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_15
@@ -36,6 +34,10 @@
 #define LLFIO_DISABLE_OPENSSL 1
 #define QUICKCPPLIB_USE_STD_SPAN 1
 // #define OUTCOME_USE_SYSTEM_STATUS_CODE 0
+
+#if defined(__MINGW32__)
+#define LLFIO_DISABLE_SIGNAL_GUARD 1
+#endif
 
 #if !defined(__has_feature)
 #define __has_feature(T) 0
@@ -208,6 +210,37 @@ void for_all_files(std::string_view root, std::function<void(std::string_view)> 
 
 namespace score
 {
+namespace
+{
+// Mitigation for same bug as https://github.com/microsoft/STL/issues/165
+struct AsyncScanState
+{
+  using Map = ossia::string_map<std::vector<RecursiveWatch::AsyncCallbacks>>;
+
+  Map watched;
+  std::string root;
+  QPointer<QObject> ctx;
+
+  AsyncScanState(Map&& w, std::string r, QObject* c)
+      : watched{std::move(w)}
+      , root{std::move(r)}
+      , ctx{c}
+  {
+  }
+
+  AsyncScanState(AsyncScanState&& other) noexcept
+      : watched{std::move(other.watched)}
+      , root{std::move(other.root)}
+      , ctx{std::move(other.ctx)}
+  {
+  }
+
+  AsyncScanState(const AsyncScanState&) = delete;
+  AsyncScanState& operator=(AsyncScanState&&) = delete;
+  AsyncScanState& operator=(const AsyncScanState&) = delete;
+};
+}
+
 void RecursiveWatch::scan() const
 {
 #if !defined(SCORE_DEPLOYMENT_BUILD)
@@ -241,16 +274,13 @@ void RecursiveWatch::scanAsync(QObject* context)
     return;
 #endif
 
-  // Copy the state for the worker thread.
-  // The filter functions capture long-lived plugin objects so this is safe.
-  auto watched = m_asyncWatched;
-  auto root = m_root;
-
+  // Note that callers should always set a new set of watched things
+  // before calling scanAsync.
   score::TaskPool::instance().post(
-      [watched = std::move(watched), root = std::move(root), pctx = QPointer{context}] {
+      [state = AsyncScanState{std::move(m_asyncWatched), m_root, context}] {
     std::vector<std::function<void()>> actions;
 
-    auto send_to_main_thread = [pctx = pctx, &actions] {
+    auto send_to_main_thread = [pctx = state.ctx, &actions] {
       // Batch-deliver all commit actions to the GUI thread
       QMetaObject::invokeMethod(
           QCoreApplication::instance(), [pctx = pctx, actions = std::move(actions)] {
@@ -263,7 +293,7 @@ void RecursiveWatch::scanAsync(QObject* context)
       actions.clear();
     };
 
-    for_all_files(root, [&](std::string_view path) {
+    for_all_files(state.root, [&](std::string_view path) {
       if(path.empty())
         return;
       auto last_dot = path.find_last_of('.');
@@ -271,8 +301,8 @@ void RecursiveWatch::scanAsync(QObject* context)
         return;
 
       std::string_view suffix = path.substr(last_dot + 1);
-      auto it = watched.find(suffix);
-      if(it == watched.end())
+      auto it = state.watched.find(suffix);
+      if(it == state.watched.end())
         return;
       for(auto& handler : it->second)
       {

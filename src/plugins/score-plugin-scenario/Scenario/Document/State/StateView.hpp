@@ -5,6 +5,7 @@
 #include <score/model/ColorInterpolator.hpp>
 
 #include <QGraphicsItem>
+#include <QPainterPath>
 #include <QRect>
 
 #include <score_plugin_scenario_export.h>
@@ -30,8 +31,8 @@ class SCORE_PLUGIN_SCENARIO_EXPORT StateView final
   W_OBJECT(StateView)
   Q_INTERFACES(QGraphicsItem)
 public:
-  static const constexpr qreal fullRadius = 6.;
-  static const constexpr qreal pointRadius = 3.5;
+  static const constexpr qreal fullRadius = 8.;
+  static const constexpr qreal pointRadius = 5.;
   static const constexpr qreal notDilated = 1.;
   static const constexpr qreal dilated = 1.5;
 
@@ -44,6 +45,9 @@ public:
   StatePresenter& presenter() const { return m_presenter; }
 
   QRectF boundingRect() const override;
+  QPainterPath shape() const override;
+  QPainterPath opaqueArea() const override;
+  bool contains(const QPointF& point) const override;
 
   void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget)
       override;

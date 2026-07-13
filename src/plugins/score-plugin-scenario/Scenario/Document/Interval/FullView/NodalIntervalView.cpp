@@ -41,6 +41,10 @@ W_OBJECT_IMPL(Scenario::NodalContainer)
 namespace Scenario
 {
 constexpr double g_zoom_base = 1.2;
+// g_zoom_base is used as a logarithm base (std::log(g_zoom_base) as a
+// denominator); it must be strictly greater than 1, otherwise the division
+// would yield NaN / a division by zero.
+static_assert(g_zoom_base > 1.0);
 NodalIntervalView::NodalIntervalView(
     NodalIntervalView::ItemsToShow sh, const IntervalModel& model,
     const Process::Context& ctx, QGraphicsItem* parent)
@@ -101,6 +105,12 @@ NodalIntervalView::NodalIntervalView(
       }
     }
   }
+  if(const double savedScale = m_model.nodalScale(); savedScale != 1.0)
+  {
+    m_container->setScale(savedScale);
+    m_zoomLevel = std::log(savedScale) / std::log(g_zoom_base);
+  }
+
   QTimer::singleShot(1, this, &NodalIntervalView::recenterRelativeToView);
 }
 
@@ -157,6 +167,8 @@ void NodalIntervalView::recenter()
   auto delta = ourCenter - childCenter;
 
   m_container->setPos(delta);
+  m_zoomLevel = std::log(z) / std::log(g_zoom_base);
+  const_cast<IntervalModel&>(m_model).setNodalScale(z);
   const_cast<IntervalModel&>(m_model).setNodalOffset(QPointF{});
 }
 
@@ -167,6 +179,7 @@ void NodalIntervalView::rescale()
   auto childRect = enclosingRect();
 
   m_container->setScale(1.0);
+  m_zoomLevel = 0.;
 
   auto childCenter
       = m_container->mapRectToParent(childRect).center() - m_container->pos();
@@ -174,6 +187,7 @@ void NodalIntervalView::rescale()
   auto delta = ourCenter - childCenter;
 
   m_container->setPos(delta + m_model.nodalOffset());
+  const_cast<IntervalModel&>(m_model).setNodalScale(1.0);
 }
 
 NodalIntervalView::~NodalIntervalView()
@@ -361,6 +375,7 @@ void NodalIntervalView::wheelEvent(QGraphicsSceneWheelEvent* event)
 
   QPointF newAnchorPos = m_container->mapToParent(localAnchor);
   m_container->setPos(m_container->pos() + (anchor - newAnchorPos));
+  const_cast<IntervalModel&>(m_model).setNodalScale(newScale);
 
   event->accept();
 }
@@ -393,6 +408,7 @@ void NodalIntervalView::zoomTo(double newZoomLevel)
 
   const QPointF newAnchorPos = m_container->mapToParent(localAnchor);
   m_container->setPos(m_container->pos() + (anchor - newAnchorPos));
+  const_cast<IntervalModel&>(m_model).setNodalScale(newScale);
 }
 
 void NodalIntervalView::on_dropOnNode(const QPointF& pos, const QMimeData& mime)

@@ -199,7 +199,8 @@ PathInfo::PathInfo(std::string_view v) noexcept
 
 alignas(32) thread_local char g_file_search_buffer[16384];
 
-#if !defined(_MSC_VER)
+// Multiversioning: only valid where the avx2 variant exists (x86_64).
+#if defined(__x86_64__) && !defined(_MSC_VER)
 __attribute__((target("default")))
 #endif
 bool fast_contains(std::string_view data, std::string_view pattern);
@@ -208,8 +209,8 @@ bool fileContains(QFile& f, std::string_view pattern)
 {
   if(!f.open(QIODevice::ReadOnly))
     return {};
-  ssize_t sz = f.read(g_file_search_buffer, sizeof(g_file_search_buffer));
-  if(sz < pattern.size())
+  const qint64 sz = f.read(g_file_search_buffer, sizeof(g_file_search_buffer));
+  if(sz < qint64(pattern.size()))
     return {};
 
   return fast_contains(std::string_view(g_file_search_buffer, sz), pattern);

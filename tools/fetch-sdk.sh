@@ -3,7 +3,7 @@
 if [[ $# > 0 ]]; then
   export SDK_VERSION=$1
 else
-  export SDK_VERSION=sdk36
+  export SDK_VERSION=sdk37
 fi
 
 echo "Running on OSTYPE: '$OSTYPE'"
@@ -12,9 +12,9 @@ export LATEST_TAG=$(git describe --tags --abbrev=0)
 export LATEST_TAG_NOV=$(echo "$LATEST_TAG" | sed "s/v//")
 export BASE_SDK=https://github.com/ossia/score-sdk/releases/download/$SDK_VERSION
 export BOOST_SDK=https://github.com/ossia/score-sdk/releases/download/sdk31
-export BOOST_VER=boost_1_88_0
+export BOOST_VER=boost_1_90_0
 export LATEST_RELEASE=https://github.com/ossia/score/releases/download/$LATEST_TAG
-export CMAKE_VERSION=4.1.2
+export CMAKE_VERSION=4.3.2
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
 (
@@ -81,20 +81,6 @@ else
   mkdir "$SDK_DIR"
   cd "$SDK_DIR"
 
-  # Download cmake
-  if [[ ! -d "$SDK_DIR/cmake" ]] ; then
-    if ! command -v cmake >/dev/null 2>&1 ; then
-      echo "CMake not found, installing..."
-      curl -L -0 https://github.com/Kitware/CMake/releases/download/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-windows-x86_64.zip --output cmake.zip
-      unzip -qq cmake.zip
-      mv cmake-$CMAKE_VERSION-windows-x86_64 cmake
-    fi
-  fi
-
-  if [[ -d "$SDK_DIR/cmake" ]] ; then
-    export PATH="$PATH:$SDK_DIR/cmake/bin"
-  fi
-
   if [[ ! -f "$SDK_DIR/llvm/bin/clang.exe" ]] ; then
   (
     SDK_ARCHIVE=sdk-mingw-x86_64.7z
@@ -115,6 +101,20 @@ else
   if [[ ! -f "$SDK_DIR/llvm/bin/clang.exe" ]] ; then
     echo "SDK error: clang not found"
     exit 1
+  fi
+
+  # Download cmake
+  if [[ -d "$SDK_DIR/cmake" ]] ; then
+    rm -rf "$SDK_DIR/cmake"
+  fi
+
+  echo "CMake not found, installing..."
+  curl -L -0 https://github.com/Kitware/CMake/releases/download/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-windows-x86_64.zip --output cmake.zip
+  unzip -qq cmake.zip
+  mv cmake-$CMAKE_VERSION-windows-x86_64 cmake
+
+  if [[ -d "$SDK_DIR/cmake" ]] ; then
+    export PATH="$PATH:$SDK_DIR/cmake/bin"
   fi
 
   # Download boost

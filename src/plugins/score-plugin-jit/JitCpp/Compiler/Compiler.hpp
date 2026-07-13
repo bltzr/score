@@ -22,6 +22,11 @@ public:
       const std::string& cppCode, const std::vector<std::string>& flags,
       CompilerOptions opts, llvm::orc::ThreadSafeContext& context);
 
+  // Whether the executor is driven by an Orc Platform (orc_rt: native TLS, real
+  // static-init/atexit, and -- on COFF -- SEH/exception registration). Set at
+  // construction; on COFF the platform is mandatory.
+  bool m_useNativePlatform{};
+
   template <class Signature_t>
   llvm::Expected<std::function<Signature_t>> getFunction(std::string name)
   {
@@ -44,7 +49,7 @@ public:
   {
     return m_errors;
   }
-  std::unique_ptr<llvm::jitlink::InProcessMemoryManager> m_memmgr;
+  std::unique_ptr<llvm::jitlink::JITLinkMemoryManager> m_memmgr;
   ClangCC1Driver m_driver;
   std::unique_ptr<llvm::orc::LLJIT> m_jit;
 

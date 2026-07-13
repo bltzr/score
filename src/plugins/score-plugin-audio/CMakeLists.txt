@@ -23,6 +23,7 @@ set(HDRS
     "${CMAKE_CURRENT_SOURCE_DIR}/Audio/PipeWireInterface.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Audio/PortAudioInterface.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Audio/SDLInterface.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Audio/WASMMiniAudioInterface.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Audio/WASAPIPortAudioInterface.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Audio/WDMKSPortAudioInterface.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Audio/AudioApplicationPlugin.hpp"
@@ -85,7 +86,13 @@ if(OSSIA_ENABLE_JACK)
 endif()
 
 if(OSSIA_ENABLE_PIPEWIRE)
-  target_link_libraries(${PROJECT_NAME} PRIVATE $<BUILD_INTERFACE:pipewire::pipewire>)
+  # include-only; libpipewire is dlopened by libremidi at runtime
+  if(TARGET pipewire::pipewire)
+    get_target_property(_pw_includes pipewire::pipewire INTERFACE_INCLUDE_DIRECTORIES)
+    if(_pw_includes)
+      target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${_pw_includes})
+    endif()
+  endif()
   list(APPEND SCORE_FEATURES_LIST pipewire)
 endif()
 
@@ -94,10 +101,14 @@ if(OSSIA_ENABLE_SDL)
   list(APPEND SCORE_FEATURES_LIST sdl)
 endif()
 
-if(LINUX OR BSD OR APPLE)
+if(LINUX OR BSD OR APPLE OR EMSCRIPTEN)
   target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE "${OSSIA_3RDPARTY_FOLDER}/miniaudio")
   if(APPLE)
-    target_link_libraries(${PROJECT_NAME} PRIVATE "-framework AudioUnit" "$<BUILD_INTERFACE:kfr>")
+    target_link_libraries(${PROJECT_NAME} PRIVATE "-framework AudioUnit")
+  endif()
+  if(EMSCRIPTEN)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE MA_ENABLE_AUDIO_WORKLETS MA_ENABLE_WEBAUDIO)
+    target_link_options(${PROJECT_NAME} PUBLIC -sAUDIO_WORKLET=1 -sWASM_WORKERS=1)
   endif()
 endif()
 setup_score_plugin(${PROJECT_NAME})

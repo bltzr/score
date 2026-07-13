@@ -212,7 +212,6 @@ target_compile_definitions(score_lib_base INTERFACE
   FMT_HEADER_ONLY=1
 
   FMT_USE_LONG_DOUBLE=0
-  FMT_USE_INT128=0
   FMT_USE_FLOAT128=0
   FMT_STATIC_THOUSANDS_SEPARATOR=1
 
@@ -257,6 +256,7 @@ include_directories(SYSTEM "${OSSIA_3RDPARTY_FOLDER}/libremidi/include")
 include_directories(SYSTEM "${OSSIA_3RDPARTY_FOLDER}/mdspan/include")
 include_directories(SYSTEM "${OSSIA_3RDPARTY_FOLDER}/nano-signal-slot/include")
 include_directories(SYSTEM "${OSSIA_3RDPARTY_FOLDER}/oscpack")
+include_directories(SYSTEM "${OSSIA_3RDPARTY_FOLDER}/rapidhash")
 include_directories(SYSTEM "${OSSIA_3RDPARTY_FOLDER}/rapidjson/include")
 include_directories(SYSTEM "${OSSIA_3RDPARTY_FOLDER}/readerwriterqueue")
 include_directories(SYSTEM "${OSSIA_3RDPARTY_FOLDER}/rnd/include")
