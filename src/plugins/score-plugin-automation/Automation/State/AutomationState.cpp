@@ -14,6 +14,10 @@
 
 #include <Automation/AutomationModel.hpp>
 
+#include <Curve/CurveModel.hpp>
+#include <Curve/Point/CurvePointModel.hpp>
+#include <Curve/Segment/CurveSegmentModel.hpp>
+
 #include <score/document/DocumentContext.hpp>
 #include <score/document/DocumentInterface.hpp>
 #include <score/model/IdentifiedObjectMap.hpp>
@@ -146,6 +150,12 @@ std::vector<State::AddressAccessor> ProcessState::matchingAddresses()
             seg_it->setStart({0, val});
           }
         }
+        // The segment->point linkage that repositions the displayed point can go
+        // stale after curve rebuilds (sequence twin-sync churns the curve). Update
+        // the actual boundary point(s) directly so the disc always tracks the value.
+        for(Curve::PointModel* pt : process().curve().points())
+          if(pt->pos().x() < 1e-6 && pt->pos().y() != val)
+            pt->setPos({0., val});
       }
       else if(m_point == 1)
       {
@@ -159,7 +169,14 @@ std::vector<State::AddressAccessor> ProcessState::matchingAddresses()
           if(val != seg_it->end().y())
             seg_it->setEnd({1, val});
         }
+        for(Curve::PointModel* pt : process().curve().points())
+          if(pt->pos().x() > 1. - 1e-6 && pt->pos().y() != val)
+            pt->setPos({1., val});
       }
+      // Rebuild the curve's views so the displayed boundary disc reflects the
+      // synced value even when its point-view was orphaned by a prior curve
+      // rebuild (a manual slot resize does exactly this). Sequence IS twin-sync.
+      process().curve().curveReset();
       return messages();
     }
   }
