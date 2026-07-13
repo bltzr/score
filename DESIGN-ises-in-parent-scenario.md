@@ -606,47 +606,44 @@ authored rigidity (`min=max=default`). This is semantically necessary, not cosme
 leftover flexible lane into a 1-incoming trigger-less sync fires at *min*, cutting
 content.
 
-### The unifying invariant (user case #2, `diamond-flexible+authored.score`, 2026-07-13)
-The flavors are instances of one **floor-equalization invariant**: *at every
-multi-incoming sync, no branch's earliest possible completion may precede any other
-branch's pending gate.* Violations and their fixes:
-- **Gate computed** (flavor-1 lane, min := parallel floor): equal by construction.
-- **Gate AUTHORED** (user drags the accompaniment's min brace above the structure's
-  floor — a legitimate "A must play at least this long"): the structural branch's
-  min-null interval **becomes extend-only flexible**: `rigid=false,
-  min := its DefaultDuration (the authored/composed length in the inspector),
-  max = ∞` — emphatically NOT `min=max=default` (that would re-rigidify it). The
-  user stresses (2026-07-13) that *being flexible* is the essential half: B1 keeps
-  its dashed extendability (it can run past its default while waiting for its TP);
-  the min only guarantees its composed content can't be cut by an early trigger.
-  This restores the invariant — the actual failure in the user's file: TP fired
-  < min(A)−dur(B2) cut B1 and froze B2 while A played alone. Side effect: the sync
-  can then never fire before the structural branch's full nominal, so the authored
-  min becomes a safety floor rather than an operative gate. (Tighter alternative —
-  equalize exactly, `min(B1) := min(A) − dur(B2)` — preserves some early-trigger
-  freedom but cuts B1's content; rejected as default, possible opt-in.)
+### The unifying principle — wait-absorption
+### (user case #2, `diamond-flexible+authored.score`; CORRECTED 2026-07-13: the user
+### meant **B2** throughout, not B1 — the earlier "floor-equalization/min-raising"
+### reading is DEAD)
+One principle unifies everything: **any interval that can be made to WAIT at its end
+sync — the sync's fire date can exceed the interval's own arrival — must be flexible.**
+Early arrival is *absorbed by keep-playing*, never *prevented* by raising mins.
+
+The failure in the user's file, correctly read: TP fires early at `T` → B1 is cut at
+`T` (**by design** — that is what an interactive trigger is for) → B2 plays its rigid
+content, finishes at `T + dur(B2) < min(A)` (A's authored gate, 1806324218) → **B2
+freezes green-and-silent while A plays on**. The fix is on **B2**:
+`rigid=false, min := its own DefaultDuration, max = ∞` (extend-only). Timeline:
+`Sync3 fires at max(T + dur(B2), min(A))` — early TP → B2 finishes its content, then
+dashes until A's authored min, then everything closes with A cut exactly at its min;
+later TP → closes when B2's content is done. Nothing freezes in any case, **A's
+authored min stays fully operative, and B1's min-null early-trigger freedom is fully
+preserved (B1 needs NO change).**
 
 ### Simplified taxonomy: only two flexible-interval configurations
-The user's B1 rule and "flavor 2" turn out to be the SAME interval state with two
-different causes, collapsing the design into two configurations:
 
-| Configuration | min | max | applies to | cause |
-|---|---|---|---|---|
-| **Fully elastic** (cut + extend) | computed from sibling branches (PERT floor) | ∞ | accompaniment lanes spanning the diamond (A; the sequence's host interval) — the *redundant edges* | absorbs sibling variance both ways |
-| **Extend-only** (never cut) | its **own DefaultDuration** | ∞ | structural intervals that may outlast their nominal: an interval waiting at **its own TP** (B1, the authored-gate case) or a **chain-end waiting at a shared sync** for unpredictable sibling branches (B2/C2 when ≥2 nondeterministic chains converge — "flavor 2") | content guaranteed; freeze replaced by keep-playing |
+| Configuration | min | max | applies to |
+|---|---|---|---|
+| **Fully elastic** (cut + extend) | computed from sibling branches (PERT floor, masked mins) | ∞ | accompaniment lanes spanning the diamond — the *redundant edges* (A; the sequence's host interval) |
+| **Extend-only** (never cut) | its **own DefaultDuration** (the authored/composed length in the inspector) — emphatically NOT `min=max=default`, which would re-rigidify; *being flexible* is the essential half | ∞ | **structural intervals that can be made to wait** at a multi-incoming sync — causes are all the same condition ("the sync can fire later than my arrival"): a sibling's **authored min gate** exceeding my earliest arrival (this file), sibling branches containing **TPs** (≥2 nondeterministic chains — the former "flavor 2"), or any combination |
 
-Everything else stays rigid/authored. The auto-rule assigns "fully elastic" to
-redundant edges (when siblings are nondeterministic) and "extend-only" to structural
-intervals whose wait risk comes from elsewhere (authored gates, sibling TP chains).
-- A fully **rigid** too-early branch cannot occur (rigid floor = nominal ≥ any
-  authored min ≤ nominal).
+Everything else stays rigid/authored. Consistency check across the user's cases: no
+TP/authored-gate in A ⇒ B2 can never wait ⇒ B2 stays rigid (`diamond-flexible.score`);
+A gains an authored min > B2's earliest arrival ⇒ B2 extend-only (this file).
 
-**Additional implementation edge**: `SetMinDuration`/brace-drag on a diamond member is
-itself an equalization edge — the command gets children raising sibling elastic mins
-(undo-safe). V1 statelessness limitation: *lowering* an authored min later does not
-auto-restore siblings' min-null (undo does; manual otherwise) — restoring it would
-require remembering pre-adjustment state (possible refinement: store the authored min
-value and derive the mask, rather than overwrite).
+**Conservative safety (important simplification):** extend-only is harmless when not
+exercised — the min is what the interval had anyway, and the ∞ max is simply never
+used if the interval never waits. So the auto-rule may **over-apply** extend-only
+(e.g. to every structural interval ending at a multi-incoming sync) without semantic
+risk; precision only affects how many intervals *display* as flexible. This kills the
+need for exact waitability analysis, for `SetMinDuration` equalization edges, and for
+any stateful min-raising/restoring machinery — all of which existed only in the
+misread version.
 
 ### Architecture (the AddTrigger pattern, precedented end-to-end)
 1. **Pure helper** `Scenario/Process/Algorithms/ParallelBranches.{hpp,cpp}`:
