@@ -287,6 +287,7 @@ private:
   // The gradient for a color-unit `addr` inside a section interval, or nullptr.
   Gradient::ProcessModel* gradientForAddr(
       Scenario::IntervalModel& itv, const State::AddressAccessor& addr) const;
+
   // The sequence-wide range for `addr`, read from the first automation found.
   // Returns false if no automation exists yet for that address.
   bool currentParamRange(
@@ -301,6 +302,9 @@ private:
   // the sequence reads as parallel lanes.
   void watchSection(Scenario::IntervalModel& itv);
   void mirrorRackLayout(const Scenario::IntervalModel& source);
+  // Coalesces a mirror request to run once after the current slot command's
+  // signals settle (moving a process across slots emits several).
+  void scheduleMirror(const Scenario::IntervalModel& source);
   // The process in `target` denoting the same parameter as `pid` in `source`.
   std::optional<Id<Process::ProcessModel>> correspondingProcess(
       const Scenario::IntervalModel& source, const Id<Process::ProcessModel>& pid,
@@ -321,6 +325,10 @@ private:
   // Sequence-level ports: audio passthrough + one value outlet per parameter
   std::unique_ptr<Process::AudioOutlet> m_audioOutlet;
   std::vector<std::unique_ptr<Process::ValueOutlet>> m_paramOutlets;
+
+  // Deferred rack-mirroring state
+  Id<Scenario::IntervalModel> m_pendingMirrorSource{};
+  bool m_mirrorScheduled{};
 
   // IDs of the boundary timeSyncs (structural, not user-visible IS)
   Id<Scenario::TimeSyncModel> m_startTimeSyncId{};

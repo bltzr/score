@@ -28,12 +28,16 @@ W_OBJECT_IMPL(Sequence::SequencePresenter)
 namespace Sequence
 {
 
+// Extra room below the last section slot for the row's cable port.
+static constexpr qreal k_portFooter = 12.;
+
 SequencePresenter::SequencePresenter(
     const SequenceModel& model, SequenceView* view, const Process::Context& ctx,
     QObject* parent)
     : Process::LayerPresenter{model, view, ctx, parent}
     , m_model{model}
     , m_view{*view}
+    , m_slotResizer{this->m_context.context.commandStack}
 {
   // Update handles + sections when model structure changes
   connect(
@@ -105,10 +109,48 @@ void SequencePresenter::setWidth(qreal width, qreal defaultWidth)
 void SequencePresenter::setHeight(qreal height)
 {
   m_view.setHeight(height);
-  // Child section presenters manage their own height based on slot content;
-  // we only propagate the full height so each one knows the available space.
+  // Sections occupy the band below the rail and above the port footer.
+  const qreal sectionH = std::max(0., height - SequenceView::RailHeight - k_portFooter);
   for(auto* p : m_sectionPresenters)
-    p->view()->setHeight(height);
+    p->view()->setHeight(sectionH);
+
+  // If the parent slot was resized to something other than our auto-computed
+  // sum, the user dragged the sequence's own footer: scale the inner slots
+  // proportionally so they fill the new height (the auto-height then matches).
+  if(m_scalingInner)
+    return;
+  const auto ord = m_model.orderedIntervals();
+  if(ord.empty())
+    return;
+  const auto& first = m_model.intervals.at(ord.front());
+  const int nSlots = (int)first.smallView().size();
+  if(nSlots == 0)
+    return;
+
+  const qreal chrome
+      = Scenario::SlotHeader::headerHeight() + Scenario::SlotFooter::footerHeight();
+  const qreal fixed = SequenceView::RailHeight + k_portFooter + nSlots * chrome;
+  qreal contentSum = 0.;
+  for(const auto& s : first.smallView())
+    contentSum += s.height;
+  const qreal target = height - fixed;
+  if(contentSum <= 1. || target <= 1.)
+    return;
+  const double factor = target / contentSum;
+  if(std::abs(factor - 1.) < 0.01)
+    return;
+
+  m_scalingInner = true;
+  for(auto* p : m_sectionPresenters)
+  {
+    auto& itv = const_cast<Scenario::IntervalModel&>(p->model());
+    for(int i = 0; i < (int)itv.smallView().size(); ++i)
+    {
+      const double nh = std::max(20., itv.smallView()[i].height * factor);
+      itv.setSlotHeight(Scenario::SlotId{i, Scenario::Slot::SmallView}, nh);
+    }
+  }
+  m_scalingInner = false;
 }
 
 void SequencePresenter::putToFront()
@@ -149,7 +191,10 @@ void SequencePresenter::rebuildSections()
   if(auto ord = m_model.orderedIntervals(); !ord.empty())
   {
     auto& first = m_model.intervals.at(ord.front());
-    const auto upd = [this] { updateRowPorts(); };
+    const auto upd = [this] {
+      updateRowPorts();
+      updateParentSlotHeight();
+    };
     m_rackConns.push_back(connect(
         &first, &Scenario::IntervalModel::rackChanged, this, [upd](auto) { upd(); }));
     m_rackConns.push_back(connect(
@@ -175,26 +220,140 @@ void SequencePresenter::rebuildSections()
   const auto& startTsId = m_model.startTimeSyncId();
   const auto& endTsId = m_model.endTimeSyncId();
 
-  // Use ordered intervals so section presenters are created left-to-right,
-  // although position is set by date so order only affects zValue stacking.
+  // Use ordered intervals so section presenters are created left-to-right.
+  // Later sections get a higher zValue so that, at a shared IS boundary, the
+  // right section's start breakpoint takes the click over the left section's
+  // end breakpoint.
+  int zi = 0;
   for(const auto& itvId : m_model.orderedIntervals())
   {
     const auto& itv = m_model.intervals.at(itvId);
 
     // Section intervals span from one boundary IS to the next.
-    // All are non-boundary by construction (boundary ISes are the
-    // start/end timeSyncs — section intervals connect intermediate ISes
-    // or the boundaries themselves, but never skip them).
     // handles = true: slot footers are draggable (vertical resize) and slot
     // headers allow switching / moving processes.
     auto* pres = new Scenario::TemporalIntervalPresenter{
         m_zoom, itv, m_context.context, true, &m_view, this};
     pres->on_zoomRatioChanged(m_zoom);
+    pres->view()->setZValue(zi++);
+    // The section interval body/edges must not grab clicks (they'd shadow the
+    // IS and the boundary breakpoints); its header, footers and automation
+    // points are separate child items and stay interactive.
+    pres->view()->setAcceptedMouseButtons(Qt::NoButton);
+    // Constrain automation point moves to the section box, so endpoints can't
+    // be dragged out of the section and lost (they move freely in y).
+    pres->setBoundedLayers(true);
+    // Drive slot vertical resize from the footer-drag signals (the nested
+    // sections aren't wired to the scenario's slot-resize state machine).
+    connect(pres, &Scenario::IntervalPresenter::pressed, this, [this, pres](QPointF sp) {
+      onSectionPressed(pres, sp);
+    });
+    connect(pres, &Scenario::IntervalPresenter::moved, this, [this, pres](QPointF sp) {
+      onSectionMoved(pres, sp);
+    });
+    connect(
+        pres, &Scenario::IntervalPresenter::released, this,
+        [this](QPointF) { onSectionReleased(); });
     m_sectionPresenters.append(pres);
   }
 
   updateSectionLayout();
   updateRowPorts();
+  updateParentSlotHeight();
+}
+
+int SequencePresenter::slotFooterAt(
+    const Scenario::IntervalModel& itv, double localY) const
+{
+  qreal y = 0.;
+  const auto& sv = itv.smallView();
+  for(int i = 0; i < (int)sv.size(); ++i)
+  {
+    const qreal contentBottom
+        = y + Scenario::SlotHeader::headerHeight() + sv[i].height;
+    const qreal footerBottom = contentBottom + Scenario::SlotFooter::footerHeight();
+    // A generous band around the footer so the grab is forgiving.
+    if(localY >= contentBottom - 2. && localY <= footerBottom + 2.)
+      return i;
+    y = footerBottom;
+  }
+  return -1;
+}
+
+void SequencePresenter::onSectionPressed(
+    Scenario::TemporalIntervalPresenter* pres, QPointF sp)
+{
+  const double localY = pres->view()->mapFromScene(sp).y();
+  const int idx = slotFooterAt(pres->model(), localY);
+  if(idx < 0)
+  {
+    m_resizeSlot = -1;
+    return;
+  }
+  m_resizePres = pres;
+  m_resizeSlot = idx;
+  m_resizeOrigH = pres->model().smallView()[idx].height;
+  m_resizeOrigY = sp.y();
+}
+
+void SequencePresenter::onSectionMoved(
+    Scenario::TemporalIntervalPresenter* pres, QPointF sp)
+{
+  if(m_resizeSlot < 0 || pres != m_resizePres)
+    return;
+  const double newH = std::max(20., m_resizeOrigH + (sp.y() - m_resizeOrigY));
+  m_slotResizer.submit(
+      pres->model(),
+      Scenario::SlotPath{pres->model(), m_resizeSlot, Scenario::Slot::SmallView}, newH);
+}
+
+void SequencePresenter::onSectionReleased()
+{
+  if(m_resizeSlot < 0)
+    return;
+  m_slotResizer.commit();
+  m_resizeSlot = -1;
+  m_resizePres = nullptr;
+}
+
+void SequencePresenter::updateParentSlotHeight()
+{
+  auto* parentItv = qobject_cast<Scenario::IntervalModel*>(m_model.parent());
+  if(!parentItv)
+    return;
+
+  const auto ord = m_model.orderedIntervals();
+  if(ord.empty())
+    return;
+  const auto& first = m_model.intervals.at(ord.front());
+
+  qreal wanted = SequenceView::RailHeight;
+  for(const auto& slot : first.smallView())
+    wanted += Scenario::SlotHeader::headerHeight() + slot.height
+              + Scenario::SlotFooter::footerHeight();
+  wanted += k_portFooter;
+
+  // Locate the parent rack slot holding this sequence process.
+  const auto seqId = m_model.id();
+  const auto& sv = parentItv->smallView();
+  int idx = -1;
+  for(int i = 0; i < (int)sv.size(); ++i)
+  {
+    const auto& ps = sv[i].processes;
+    if(std::find(ps.begin(), ps.end(), seqId) != ps.end())
+    {
+      idx = i;
+      break;
+    }
+  }
+  if(idx < 0)
+    return;
+
+  const Scenario::SlotId sid{idx, Scenario::Slot::SmallView};
+  // Derived value: set directly on the model (not via command) and guard the
+  // re-entrancy loop through the parent's slotResized signal.
+  if(std::abs(parentItv->getSlotHeight(sid) - wanted) > 0.5)
+    parentItv->setSlotHeight(sid, wanted);
 }
 
 void SequencePresenter::updateRowPorts()
@@ -211,10 +370,14 @@ void SequencePresenter::updateRowPorts()
 
   // Row layout mirrors TemporalIntervalPresenter::updatePositions:
   // each slot is [header][content][footer], stacked from y = 1.
+  static constexpr qreal portDiam = 8.;
   qreal y = SequenceView::RailHeight + 1.;
   for(const auto& slot : first.smallView())
   {
     const qreal headerY = y;
+    // Bottom of the automation content (below the header, above the footer)
+    const qreal contentBottom
+        = headerY + Scenario::SlotHeader::headerHeight() + slot.height;
     y += Scenario::SlotHeader::headerHeight() + slot.height
          + Scenario::SlotFooter::footerHeight();
 
@@ -243,7 +406,8 @@ void SequencePresenter::updateRowPorts()
           auto& port = const_cast<Process::ValueOutlet&>(*outlet);
           if(auto* item = fact->makePortItem(port, m_context.context, &m_view, this))
           {
-            item->setPos(2., headerY + 2.);
+            // Bottom-left of the automation, not in the header
+            item->setPos(2., contentBottom - portDiam - 2.);
             item->setZValue(11.);
             m_rowPorts.push_back(item);
           }

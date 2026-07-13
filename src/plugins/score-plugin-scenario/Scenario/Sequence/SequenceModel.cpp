@@ -1337,12 +1337,33 @@ void SequenceModel::undoInsertIS(const InsertedIS& info)
 
 // ---- IS value management ----
 
+void SequenceModel::scheduleMirror(const Scenario::IntervalModel& source)
+{
+  if(m_rackSync)
+    return;
+  m_pendingMirrorSource = source.id();
+  if(m_mirrorScheduled)
+    return;
+  m_mirrorScheduled = true;
+  // Run after the current slot command's signals settle: moving a process
+  // across slots emits layerRemoved + slotAdded/slotRemoved in sequence, and
+  // mirroring on the first (intermediate) state would corrupt the others.
+  QMetaObject::invokeMethod(
+      this,
+      [this] {
+    m_mirrorScheduled = false;
+    if(m_rackSync)
+      return;
+    auto it = intervals.find(m_pendingMirrorSource);
+    if(it != intervals.end())
+      mirrorRackLayout(*it);
+      },
+      Qt::QueuedConnection);
+}
+
 void SequenceModel::watchSection(Scenario::IntervalModel& itv)
 {
-  const auto sync = [this, &itv] {
-    if(!m_rackSync)
-      mirrorRackLayout(itv);
-  };
+  const auto sync = [this, &itv] { scheduleMirror(itv); };
   connect(
       &itv, &Scenario::IntervalModel::slotResized, this,
       [sync](Scenario::SlotId s) {
@@ -1382,6 +1403,15 @@ void SequenceModel::watchSection(Scenario::IntervalModel& itv)
   connect(
       &itv, &Scenario::IntervalModel::frontLayerChanged, this,
       [sync](int, const OptionalId<Process::ProcessModel>&) { sync(); });
+  // Coarse catch-all: moving a process to a new slot is dispatched via a
+  // queued command and the granular signals may land across event-loop
+  // cycles; rackChanged fires once the rack has settled.
+  connect(
+      &itv, &Scenario::IntervalModel::rackChanged, this,
+      [sync](Scenario::Slot::RackView v) {
+    if(v == Scenario::Slot::SmallView)
+      sync();
+      });
 }
 
 std::optional<Id<Process::ProcessModel>> SequenceModel::correspondingProcess(

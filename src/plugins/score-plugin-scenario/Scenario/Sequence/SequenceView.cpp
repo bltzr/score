@@ -9,6 +9,7 @@
 #include <QGraphicsSceneMouseEvent>
 #include <QKeyEvent>
 #include <QPainter>
+#include <QPainterPath>
 
 #include <wobjectimpl.h>
 
@@ -43,32 +44,53 @@ public:
     m_height = h;
   }
 
+  // The state dot is centred vertically in the rail strip.
+  static constexpr qreal dotR = 4.0;
+  static qreal dotCenterY() { return Sequence::SequenceView::RailHeight / 2.; }
+
   QRectF boundingRect() const override
   {
-    // Extra top margin for the state dot (radius 4.5 * 2 = 9px)
-    return {-k_handleHalfWidth, -9., k_handleHalfWidth * 2., m_height + 9.};
+    return {-k_handleHalfWidth, 0., k_handleHalfWidth * 2., m_height};
+  }
+
+  // Only the state dot is interactive: the vertical bar is purely visual, so a
+  // breakpoint sitting on the IS is never shadowed by it. The IS is grabbed
+  // (moved / rippled) via its dot.
+  QPainterPath shape() const override
+  {
+    QPainterPath path;
+    path.addEllipse(QPointF{0., dotCenterY()}, dotR + 1.5, dotR + 1.5);
+    return path;
   }
 
   void paint(QPainter* p, const QStyleOptionGraphicsItem*, QWidget*) override
   {
-    static constexpr qreal dotR = 4.5;
     auto& style = Process::Style::instance();
     const auto& pen = m_active ? style.skin.Base3.main.pen2 : style.skin.Base2.main.pen1;
     p->setPen(pen);
-    p->drawLine(QPointF{0., 0.}, QPointF{0., m_height});
-    // State indicator dot at top
+    // Vertical bar starts at the dot centre and spans the sections below.
+    p->drawLine(QPointF{0., dotCenterY()}, QPointF{0., m_height});
+    // State indicator dot, vertically centred in the rail.
     p->setPen(style.NoPen());
     p->setBrush(pen.color());
-    p->drawEllipse(QPointF{0., dotR}, dotR, dotR);
+    p->drawEllipse(QPointF{0., dotCenterY()}, dotR, dotR);
   }
 
 protected:
   void mousePressEvent(QGraphicsSceneMouseEvent* e) override
   {
+    // Insurance: only the dot moves the IS. If a press somehow arrives on the
+    // bar, reject it so it falls through to the breakpoint below.
+    if(!shape().contains(e->pos()))
+    {
+      e->ignore();
+      return;
+    }
     m_active = true;
     // Ripple mode is decided at press time and kept for the whole drag, so a
-    // single gesture never mixes two different ongoing commands.
-    m_ripple = e->modifiers().testFlag(Qt::ShiftModifier);
+    // single gesture never mixes two different ongoing commands. Ctrl (Cmd on
+    // macOS) for consistency with scale mode.
+    m_ripple = e->modifiers().testFlag(Qt::ControlModifier);
     update();
     e->accept();
   }

@@ -29,7 +29,7 @@ public:
 
   // Height of the IS rail strip at the top of the layer: handles' state dots
   // sit on it, double-clicking it inserts a new IS.
-  static constexpr double RailHeight = 14.;
+  static constexpr double RailHeight = 10.;
 
   explicit SequenceView(QGraphicsItem* parent);
   ~SequenceView() override;
