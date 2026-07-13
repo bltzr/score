@@ -602,9 +602,21 @@ For each interval `L` ending at a sync `S` with ≥2 incoming branches:
 
 **Inverse rule (diamond removed):** same predicates, stateless — when topology changes
 and `L` no longer satisfies 1 or 2 (and its end sync has no active trigger), restore
-authored rigidity (`min=max=default`). This is semantically necessary, not cosmetic: a
-leftover flexible lane into a 1-incoming trigger-less sync fires at *min*, cutting
-content.
+authored rigidity (`min=max=default`). Dissolution edges: `SplitTimeSync`/`SplitEvent`
+(breaking the shared sync — the user's example: splitting Sync3 reverts A **and** B2;
+B1 is untouched, its flexibility being trigger-owned), branch deletion
+(`RemoveSelection`), and undo of the creating commands. Partial dissolution is handled
+for free by the stateless predicates (3-branch diamond minus one branch: A stays
+flexed). Necessity is asymmetric: reverting a **fully-elastic** lane is semantically
+required (a lone trigger-less sync fires at *min* — a min < default would cut content
+every run); reverting an **extend-only** lane is near-cosmetic (min = default either
+way) but restores honest visuals.
+- **V1 refinement (probably worth doing immediately):** on revert, the user's authored
+  min on the elastic lane is lost (`min=max=default`); undo restores it, but
+  dissolve-then-recreate does not. Fix: keep the authored min as a stored value and
+  treat flexibility as a *mask* over it — exactly the pattern `IntervalDurations`
+  already uses for `minNull`/`maxInf` (flags masking stored values), so this is native
+  to the class rather than new machinery.
 
 ### The unifying principle — wait-absorption
 ### (user case #2, `diamond-flexible+authored.score`; CORRECTED 2026-07-13: the user
