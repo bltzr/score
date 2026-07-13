@@ -71,6 +71,9 @@ public:
     m_curve.view().setDefaultWidth(defaultWidth);
   }
 
+  void setBoundedMove(bool b) override { m_curve.setBoundedMove(b); }
+  void setLockEndpointsX(bool b) override { m_curve.setLockEndpointsX(b); }
+
   void setHeight(qreal height) final override
   {
     m_view->setHeight(height);

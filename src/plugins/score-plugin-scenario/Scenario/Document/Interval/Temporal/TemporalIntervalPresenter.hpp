@@ -51,6 +51,10 @@ public:
   void requestSlotMenu(int slot, QPoint pos, QPointF sp) const override;
   void requestProcessSelectorMenu(int slot, QPoint pos, QPointF sp) const;
 
+  // Opt-in: constrain interactive point moves within each layer's [0,1] box.
+  // Applies to current and future (recreated) layers.
+  void setBoundedLayers(bool b);
+
 public:
   void intervalHoverEnter() E_SIGNAL(SCORE_PLUGIN_SCENARIO_EXPORT, intervalHoverEnter)
   void intervalHoverLeave() E_SIGNAL(SCORE_PLUGIN_SCENARIO_EXPORT, intervalHoverLeave)
@@ -87,5 +91,6 @@ private:
   void createNodalSlot();
 
   bool m_handles{true};
+  bool m_boundedLayers{false};
 };
 }

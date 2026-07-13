@@ -540,6 +540,29 @@ void TemporalIntervalPresenter::createCollapsedSlot(int pos, const Slot& slt)
   updatePositions();
 }
 
+void TemporalIntervalPresenter::setBoundedLayers(bool b)
+{
+  m_boundedLayers = b;
+  // Apply to already-created layers; future ones are handled in createLayer.
+  for(auto& slot : m_slots)
+  {
+    if(auto* lay = slot.getLayerSlot())
+    {
+      for(LayerData& ld : lay->layers)
+      {
+        if(auto* p = ld.mainPresenter())
+        {
+          p->setBoundedMove(b);
+          p->setLockEndpointsX(b);
+        }
+        if(auto* v = ld.mainView())
+          if(auto* container = v->parentItem())
+            container->setFlag(QGraphicsItem::ItemClipsChildrenToShape, !b);
+      }
+    }
+  }
+}
+
 void TemporalIntervalPresenter::createLayer(
     int slot_i, const Process::ProcessModel& proc)
 {
@@ -557,6 +580,22 @@ void TemporalIntervalPresenter::createLayer(
 
     ld.updateLoops(
         m_context, m_zoomRatio, def_width, def_width, slot_height, m_view, this);
+
+    // Opt-in: constrain point moves for this presenter's layers (used by the
+    // Sequence process so section automation endpoints can't leave the section).
+    if(m_boundedLayers)
+    {
+      if(auto* p = ld.mainPresenter())
+      {
+        p->setBoundedMove(true);
+        p->setLockEndpointsX(true);
+      }
+      // Don't clip points to the section box: the endpoints sit on the
+      // section edges and would otherwise be half-clipped and unclickable.
+      if(auto* v = ld.mainView())
+        if(auto* container = v->parentItem())
+          container->setFlag(QGraphicsItem::ItemClipsChildrenToShape, false);
+    }
     // TODO on_layerModelPutToFront(i, slot.layers.front().model());
 
     // TODO we should remove the connection when the layer is removed.

@@ -60,6 +60,35 @@ void SmartTool::on_pressed(QPointF scenePoint, Curve::Point curvePoint)
     m_nothingPressed = false;
   },
       [&]() {
+    // Snap to a boundary point: a press very close to x=0 or x=1 that missed
+    // grabs the corresponding endpoint. Endpoints sit exactly on the curve
+    // edges, so their hit target is otherwise tiny/hard to reach where two
+    // curves share an edge. Opt-in (sequence section curves) so this doesn't
+    // change plain-curve editing.
+    constexpr double eps = 0.06;
+    const bool lock = m_parentSM.presenter().lockEndpointsX();
+    const bool nearStart = lock && curvePoint.x() < eps;
+    const bool nearEnd = lock && curvePoint.x() > 1. - eps;
+    if(nearStart || nearEnd)
+    {
+      const PointView* best = nullptr;
+      double bestX = nearStart ? 1e9 : -1e9;
+      for(PointView& pv : m_parentSM.presenter().points())
+      {
+        const double x = pv.pos().x();
+        if((nearStart && x < bestX) || (nearEnd && x > bestX))
+        {
+          bestX = x;
+          best = &pv;
+        }
+      }
+      if(best)
+      {
+        localSM().postEvent(new ClickOnPoint_Event(curvePoint, best));
+        m_nothingPressed = false;
+        return;
+      }
+    }
     localSM().postEvent(new score::Press_Event);
     m_nothingPressed = true;
       });

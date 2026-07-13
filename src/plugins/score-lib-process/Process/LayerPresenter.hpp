@@ -57,6 +57,12 @@ public:
   virtual void on_zoomRatioChanged(ZoomRatio) = 0;
   virtual void parentGeometryChanged() = 0;
 
+  // Opt-in: constrain interactive point moves to the layer's [0,1] box.
+  // No-op for layers that don't have movable points (e.g. curves override it).
+  virtual void setBoundedMove(bool b) { }
+  // Opt-in: pin the first/last point's x (endpoints move only vertically).
+  virtual void setLockEndpointsX(bool b) { }
+
   const ProcessModel& model() const noexcept;
 
   virtual void

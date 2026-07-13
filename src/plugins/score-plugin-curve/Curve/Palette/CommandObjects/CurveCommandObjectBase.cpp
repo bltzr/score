@@ -54,6 +54,16 @@ void CommandObjectBase::handleLocking()
   else if(bounded && current_x > 1.)
     m_state->currentPoint.setX(1.);
 
+  // Endpoint X lock: if the grabbed point is the first/last, keep its x pinned
+  // at 0/1 so it can only move vertically (used by sequence section curves).
+  if(m_presenter && m_presenter->lockEndpointsX())
+  {
+    if(m_originalPress.x() <= 1e-6)
+      m_state->currentPoint.setX(0.);
+    else if(m_originalPress.x() >= 1. - 1e-6)
+      m_state->currentPoint.setX(1.);
+  }
+
   if(current_y < 0.)
     m_state->currentPoint.setY(0.);
   else if(current_y > 1.)

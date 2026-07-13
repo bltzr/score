@@ -70,6 +70,10 @@ public:
   bool boundedMove() const noexcept { return m_boundedMove; }
   void setBoundedMove(bool b) noexcept { m_boundedMove = b; }
 
+  // When set, the first/last point can only move in y (x pinned at 0/1).
+  bool lockEndpointsX() const noexcept { return m_lockEndpointsX; }
+  void setLockEndpointsX(bool b) noexcept { m_lockEndpointsX = b; }
+
   QRectF rect() const noexcept { return m_localRect; }
 
 public:
@@ -117,5 +121,6 @@ private:
 
   bool m_enabled = true;
   bool m_boundedMove = true;
+  bool m_lockEndpointsX = false;
 };
 }
