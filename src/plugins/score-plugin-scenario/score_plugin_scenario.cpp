@@ -64,6 +64,8 @@
 #include <Scenario/Process/ScenarioFactory.hpp>
 #include <Scenario/Sequence/SequenceDropHandler.hpp>
 #include <Scenario/Sequence/SequenceExecution.hpp>
+#include <Scenario/PromotedSequence/SequenceAnchor.hpp>
+#include <Scenario/PromotedSequence/SequenceAnchorExecution.hpp>
 #include <Scenario/Sequence/SequenceFactory.hpp>
 #include <Scenario/Sequence/SequenceLayerFactory.hpp>
 #include <Scenario/Sequence/SequenceProcessMetadata.hpp>
@@ -254,6 +256,7 @@ std::vector<score::InterfaceBase*> score_plugin_scenario::factories(
   return instantiate_factories<
       score::ApplicationContext,
       FW<Process::ProcessModelFactory, ScenarioFactory, Scenario::TempoFactory,
+         Scenario::SequenceAnchorFactory,
          Sequence::SequenceFactory
          //, LoopProcessFactory
          //       , Interpolation::InterpolationFactory
@@ -294,7 +297,8 @@ std::vector<score::InterfaceBase*> score_plugin_scenario::factories(
       FW<LocalTree::ProcessComponentFactory, LocalTree::ScenarioComponentFactory,
          LocalTree::SequenceComponentFactory>,
       FW<Execution::ProcessComponentFactory, Execution::ScenarioComponentFactory,
-         Execution::SequenceComponentFactory>,
+         Execution::SequenceComponentFactory,
+         Execution::SequenceAnchorComponentFactory>,
       FW<Library::LibraryInterface, Scenario::SlotLibraryHandler,
          Scenario::ScenarioLibraryHandler>,
       FW<Scenario::IntervalResizer, Scenario::ScenarioIntervalResizer,

@@ -3,7 +3,12 @@
 #include "PromotedSequence.hpp"
 
 #include "RewireIntervalEnd.hpp"
+#include "SequenceAnchor.hpp"
 #include "SetFlexible.hpp"
+
+#include <Scenario/Document/ScenarioDocument/ScenarioDocumentModel.hpp>
+
+#include <score/document/DocumentInterface.hpp>
 
 #include <Process/Commands/EditPort.hpp>
 #include <Process/ExpandMode.hpp>
@@ -267,6 +272,90 @@ static void addGradientLane(
   m.addLayerInNewSlot(section, *created);
 }
 
+// ---- the anchor: the parallel branch owns sequence-wide behavior ----
+
+static SequenceAnchor* findAnchor(const IntervalModel& host)
+{
+  for(auto& proc : host.processes)
+    if(auto a = qobject_cast<const SequenceAnchor*>(&proc))
+      return const_cast<SequenceAnchor*>(a);
+  return nullptr;
+}
+
+static QList<State::AddressAccessor> laneAddresses(const IntervalModel& section)
+{
+  QList<State::AddressAccessor> res;
+  for(auto& proc : section.processes)
+  {
+    if(auto a = qobject_cast<const Automation::ProcessModel*>(&proc))
+      res.push_back(a->address());
+    else if(auto g = qobject_cast<const Gradient::ProcessModel*>(&proc))
+      res.push_back(g->address());
+  }
+  return res;
+}
+
+// Ensure the host carries an anchor whose namespace covers the given
+// sections' lanes, then cable the lanes of `toWire` (or of every section in
+// `all` when the anchor was just created) into the anchor's inlets.
+static void wireAnchor(
+    Scenario::Command::Macro& m, const score::DocumentContext& ctx,
+    const ProcessModel& scenar, const IntervalModel& host,
+    const std::vector<IntervalModel*>& all, const std::vector<IntervalModel*>& toWire)
+{
+  auto* anchor = findAnchor(host);
+  bool fresh = false;
+  if(!anchor)
+  {
+    auto created = m.createProcess(
+        host, Metadata<ConcreteKey_k, SequenceAnchor>::get(), QString{}, QPointF{});
+    if(!created)
+      return;
+    anchor = safe_cast<SequenceAnchor*>(created);
+    m.addLayerInNewSlot(host, *created);
+    m.showRack(host);
+    fresh = true;
+  }
+
+  // Namespace = existing ∪ lanes of the sections, order-preserving.
+  QList<State::AddressAccessor> ns = anchor->paramNamespace();
+  for(auto* sec : all)
+    for(const auto& addr : laneAddresses(*sec))
+      if(!ns.contains(addr))
+        ns.push_back(addr);
+  m.submit(new Scenario::Command::SetAnchorNamespace{*anchor, ns});
+
+  auto& docModel = score::IDocument::get<Scenario::ScenarioDocumentModel>(ctx.document);
+  auto wireSection = [&](const IntervalModel& sec) {
+    for(auto& proc : sec.processes)
+    {
+      const Process::Port* out{};
+      State::AddressAccessor addr;
+      if(auto a = qobject_cast<const Automation::ProcessModel*>(&proc))
+      {
+        out = a->outlet.get();
+        addr = a->address();
+      }
+      else if(auto g = qobject_cast<const Gradient::ProcessModel*>(&proc))
+      {
+        out = g->outlet.get();
+        addr = g->address();
+      }
+      if(!out)
+        continue;
+      if(auto in = anchor->inletFor(addr))
+        m.createCable(docModel, *out, *in, Process::CableType::ImmediateGlutton);
+    }
+  };
+
+  if(fresh)
+    for(auto* sec : all)
+      wireSection(*sec);
+  else
+    for(auto* sec : toWire)
+      wireSection(*sec);
+}
+
 // ---- the operations, composable into a single macro ----
 
 // Convert: fan two new states off the host's start/end events, create the
@@ -274,7 +363,8 @@ static void addGradientLane(
 // it, make the host flexible, record boundary values on the shared states.
 // Returns the created section.
 static IntervalModel& convertInto(
-    Scenario::Command::Macro& m, const ProcessModel& scenar, const IntervalModel& host)
+    Scenario::Command::Macro& m, const score::DocumentContext& ctx,
+    const ProcessModel& scenar, const IntervalModel& host)
 {
   std::vector<Id<Process::ProcessModel>> lanes;
   for(auto& proc : host.processes)
@@ -284,7 +374,9 @@ static IntervalModel& convertInto(
       lanes.push_back(proc.id());
   }
 
-  const double y = std::min(0.9, host.heightPercentage() + 0.1);
+  // Stacking rule (Pia): the sequence branch sits ABOVE the parallel branch,
+  // so intermediate IS verticals stay short and unambiguous.
+  const double y = std::max(0.05, host.heightPercentage() - 0.1);
   auto& startEv = Scenario::startEvent(host, scenar);
   auto& endEv = Scenario::endEvent(host, scenar);
 
@@ -329,6 +421,8 @@ static IntervalModel& convertInto(
   if(!endMsgs.empty())
     m.addMessages(s1, std::move(endMsgs));
 
+  wireAnchor(m, ctx, scenar, host, {&b1}, {&b1});
+
   return b1;
 }
 
@@ -336,8 +430,8 @@ static IntervalModel& convertInto(
 // push the shared end sync to newEndDate, create the new section, continue
 // every parameter flat from its boundary value.
 static void extendInto(
-    Scenario::Command::Macro& m, const ProcessModel& scenar, const Structure& st,
-    TimeVal newEndDate)
+    Scenario::Command::Macro& m, const score::DocumentContext& ctx,
+    const ProcessModel& scenar, const Structure& st, TimeVal newEndDate)
 {
   auto& host = *st.host;
   auto& last = *st.sections.back();
@@ -394,6 +488,10 @@ static void extendInto(
     m.addMessages(isState, std::move(isMsgs));
     m.showRack(bNew);
   }
+
+  std::vector<IntervalModel*> all = st.sections;
+  all.push_back(&bNew);
+  wireAnchor(m, ctx, scenar, host, all, {&bNew});
 }
 
 // Migrate an old encapsulated Sequence process into the promoted form:
@@ -401,7 +499,8 @@ static void extendInto(
 // gradient copy), remove the old process, make the host flexible.
 // Returns the new sections.
 static std::vector<IntervalModel*> migrateInto(
-    Scenario::Command::Macro& m, const ProcessModel& scenar, const IntervalModel& host,
+    Scenario::Command::Macro& m, const score::DocumentContext& ctx,
+    const ProcessModel& scenar, const IntervalModel& host,
     const Sequence::SequenceModel& seq)
 {
   // Old sections, in temporal order (internal dates are host-relative).
@@ -413,7 +512,9 @@ static std::vector<IntervalModel*> migrateInto(
   });
 
   const TimeVal base = host.date();
-  const double y = std::min(0.9, host.heightPercentage() + 0.1);
+  // Stacking rule (Pia): the sequence branch sits ABOVE the parallel branch,
+  // so intermediate IS verticals stay short and unambiguous.
+  const double y = std::max(0.05, host.heightPercentage() - 0.1);
   auto& startEv = Scenario::startEvent(host, scenar);
   auto& endEv = Scenario::endEvent(host, scenar);
 
@@ -487,6 +588,8 @@ static std::vector<IntervalModel*> migrateInto(
 
   m.removeProcess(host, seq.id());
   m.submit(new Scenario::Command::SetFlexible{host, host.duration.defaultDuration()});
+
+  wireAnchor(m, ctx, scenar, host, newSections, newSections);
 
   return newSections;
 }
@@ -569,7 +672,7 @@ bool convertOrExtend(
       return false;
 
     Macro m{new ExtendPromotedSequence, ctx};
-    extendInto(m, scenar, *st, newEndDate);
+    extendInto(m, ctx, scenar, *st, newEndDate);
     m.commit();
     return true;
   }
@@ -588,7 +691,7 @@ bool convertOrExtend(
   if(oldSeq)
   {
     Macro m{new ConvertToPromotedSequence, ctx};
-    auto sections = migrateInto(m, scenar, member, *oldSeq);
+    auto sections = migrateInto(m, ctx, scenar, member, *oldSeq);
     if(sections.empty())
       return false;
 
@@ -598,7 +701,7 @@ bool convertOrExtend(
       Structure st;
       st.host = const_cast<IntervalModel*>(&member);
       st.sections = std::move(sections);
-      extendInto(m, scenar, st, newEndDate);
+      extendInto(m, ctx, scenar, st, newEndDate);
     }
     m.commit();
     return true;
@@ -606,7 +709,7 @@ bool convertOrExtend(
 
   // Not a sequence yet: convert, and extend if the drag went beyond the end.
   Macro m{new ConvertToPromotedSequence, ctx};
-  auto& b1 = convertInto(m, scenar, member);
+  auto& b1 = convertInto(m, ctx, scenar, member);
 
   auto& endSync = Scenario::endTimeSync(member, scenar);
   if(newEndDate > endSync.date() + TimeVal::fromMsecs(10))
@@ -614,7 +717,7 @@ bool convertOrExtend(
     Structure st;
     st.host = const_cast<IntervalModel*>(&member);
     st.sections = {&b1};
-    extendInto(m, scenar, st, newEndDate);
+    extendInto(m, ctx, scenar, st, newEndDate);
   }
 
   m.commit();
@@ -642,7 +745,7 @@ bool createFromState(
       Scenario::Point{endDate, startState.heightPercentage()});
 
   // The sequence branch: one section between fresh states on both events.
-  auto& b1 = convertInto(m, scenar, host);
+  auto& b1 = convertInto(m, ctx, scenar, host);
 
   // Seed one lane per parameter of the start state, ramping from the state's
   // value to the current device value — like the old process did.
@@ -742,6 +845,9 @@ bool createFromState(
     m.addMessages(s1, std::move(endMsgs));
   if(!b1.processes.empty())
     m.showRack(b1);
+
+  // The anchor was created (empty) during conversion; cover the seeded lanes.
+  wireAnchor(m, ctx, scenar, host, {&b1}, {&b1});
 
   m.commit();
   return true;
