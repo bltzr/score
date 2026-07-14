@@ -24,6 +24,7 @@
 #include <Scenario/Document/TimeSync/TimeSyncModel.hpp>
 #include <Scenario/Process/Algorithms/Accessors.hpp>
 #include <Scenario/Process/ScenarioModel.hpp>
+#include <Scenario/Sequence/SequenceModel.hpp>
 
 namespace Scenario::PromotedSequence
 {
@@ -269,6 +270,85 @@ static void extendInto(
     m.addMessages(isState, std::move(isMsgs));
 }
 
+// Migrate an old encapsulated Sequence process into the promoted form:
+// recreate its internal sections/ISes as native elements (full curve copy),
+// remove the old process, make the host flexible. Returns the new sections.
+static std::vector<IntervalModel*> migrateInto(
+    Scenario::Command::Macro& m, const ProcessModel& scenar, const IntervalModel& host,
+    const Sequence::SequenceModel& seq)
+{
+  // Old sections, in temporal order (internal dates are host-relative).
+  std::vector<const IntervalModel*> oldSections;
+  for(auto& itv : seq.intervals)
+    oldSections.push_back(&itv);
+  std::sort(oldSections.begin(), oldSections.end(), [](auto* a, auto* b) {
+    return a->date() < b->date();
+  });
+
+  const TimeVal base = host.date();
+  const double y = std::min(0.9, host.heightPercentage() + 0.1);
+  auto& startEv = Scenario::startEvent(host, scenar);
+  auto& endEv = Scenario::endEvent(host, scenar);
+
+  std::vector<IntervalModel*> newSections;
+  const StateModel* prev = &m.createState(scenar, startEv.id(), y);
+
+  for(std::size_t k = 0; k < oldSections.size(); ++k)
+  {
+    auto& sec = *oldSections[k];
+    const bool lastSec = (k == oldSections.size() - 1);
+
+    const StateModel* next{};
+    if(lastSec)
+    {
+      next = &m.createState(scenar, endEv.id(), y);
+    }
+    else
+    {
+      const TimeVal isDate = base + Scenario::endTimeSync(sec, seq).date();
+      auto [ts, ev, st] = m.createDot(scenar, Scenario::Point{isDate, y});
+      next = &st;
+    }
+
+    auto& newItv = m.createInterval(scenar, prev->id(), next->id());
+    newSections.push_back(&newItv);
+
+    State::MessageList startMsgs, endMsgs;
+    for(auto& proc : sec.processes)
+    {
+      auto a = qobject_cast<const Automation::ProcessModel*>(&proc);
+      if(!a)
+        continue; // V1: gradients/other section processes are not migrated
+
+      auto created = m.createProcess(
+          newItv, Metadata<ConcreteKey_k, Automation::ProcessModel>::get(), QString{},
+          QPointF{});
+      if(!created)
+        continue;
+      auto& newAuto = *safe_cast<Automation::ProcessModel*>(created);
+      m.submit(new Automation::InitAutomation{
+          newAuto, a->address(), a->min(), a->max(), a->curve().toCurveData()});
+
+      if(k == 0)
+        startMsgs.push_back(State::Message{
+            a->address(), ossia::value{float(realValue(*a, curveStartY(*a)))}});
+      endMsgs.push_back(State::Message{
+          a->address(), ossia::value{float(realValue(*a, curveEndY(*a)))}});
+    }
+    if(!startMsgs.empty())
+      m.addMessages(*prev, std::move(startMsgs));
+    if(!endMsgs.empty())
+      m.addMessages(*next, std::move(endMsgs));
+
+    prev = next;
+  }
+
+  m.removeProcess(host, seq.id());
+  m.submit(new Scenario::Command::SetFlexible{host, host.duration.defaultDuration()});
+
+  return newSections;
+}
+
 }
 
 std::optional<Structure> locate(const ProcessModel& scenar, const IntervalModel& any)
@@ -348,6 +428,36 @@ bool convertOrExtend(
 
     Macro m{new ExtendPromotedSequence, ctx};
     extendInto(m, scenar, *st, newEndDate);
+    m.commit();
+    return true;
+  }
+
+  // Old encapsulated Sequence process? Migrate it to the promoted form,
+  // then extend if the drag went beyond the end.
+  const Sequence::SequenceModel* oldSeq{};
+  for(auto& proc : member.processes)
+  {
+    if(auto s = qobject_cast<const Sequence::SequenceModel*>(&proc))
+    {
+      oldSeq = s;
+      break;
+    }
+  }
+  if(oldSeq)
+  {
+    Macro m{new ConvertToPromotedSequence, ctx};
+    auto sections = migrateInto(m, scenar, member, *oldSeq);
+    if(sections.empty())
+      return false;
+
+    auto& endSync = Scenario::endTimeSync(member, scenar);
+    if(newEndDate > endSync.date() + TimeVal::fromMsecs(10))
+    {
+      Structure st;
+      st.host = const_cast<IntervalModel*>(&member);
+      st.sections = std::move(sections);
+      extendInto(m, scenar, st, newEndDate);
+    }
     m.commit();
     return true;
   }

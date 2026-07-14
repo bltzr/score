@@ -12,8 +12,21 @@ from a state**, exactly like the old sequence process:
 - **Subsequent drags** from the shared end state: extend to the released date.
 - During the drag you see the normal ghost interval; it is rolled back at
   release and replaced by the real structure.
-- Old encapsulated-Sequence documents keep the legacy ongoing-extend behavior
-  (detected by the presence of the old process — nothing breaks).
+- **Old encapsulated-Sequence hosts are MIGRATED** (Pia's request): the blue +
+  on their end state flattens the old process into the promoted form — every
+  internal section becomes a native interval, every internal IS becomes a
+  native state/event/timesync at the right date, every automation is copied
+  **with its full curve** (same address/min/max), IS values recorded on the
+  new states, the old process removed, the host made flexible — then the
+  extension is appended. One undoable command; undo restores the old process
+  intact. V1 migration limits: automations only (gradients/other section
+  processes are dropped from the sequence branch — flagged), cables into the
+  old process's per-parameter outlets are lost (native per-automation outlets
+  replace them).
+- Creating from a bare state still uses the legacy CreateSequence (old-style
+  process with device-value ramps) — it then gets migrated on its first
+  extension. Porting the ramp logic to a native-first creation is a clean
+  follow-up if preferred.
 - Extend length = wherever you release (no longer "last section's duration").
 - Conversion no longer requires automations (an empty section is fine — drop
   parameters later).

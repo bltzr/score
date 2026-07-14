@@ -184,73 +184,21 @@ protected:
     }
     else
     {
-      // Check if we're extending an existing sequence rather than creating a new one.
-      // This is the case when originalState is the end state of an interval
-      // that already contains a SequenceModel.
-      auto& st = this->m_parentSM.model().state(originalState);
-      bool isExtend = false;
-      if(st.previousInterval())
-      {
-        auto& prevItv
-            = this->m_parentSM.model().intervals.at(*st.previousInterval());
-        for(auto& proc : prevItv.processes)
-        {
-          if(qobject_cast<Sequence::SequenceModel*>(&proc))
-          {
-            isExtend = true;
-            break;
-          }
-        }
-      }
+      // Promoted sequences: the drag always shows a plain creation ghost;
+      // conversion / migration / extension happens in one command at release
+      // (ScenarioCreation_FromState's released handler). Old encapsulated
+      // Sequence hosts are migrated there too — no ongoing-extend any more.
+      auto cmd = Scenario::Command::CreateSequence::make(
+          this->m_parentSM.context().context, this->m_parentSM.model(),
+          originalState,
+          this->currentPoint.date, this->currentPoint.y);
 
-      if(isExtend)
-      {
-        // Populate sentinel IDs so mapWithCollision excludes the moving end
-        // elements from collision detection, and move_nothing's empty-check
-        // does not trigger a spurious rollback. These are stable for the
-        // entire drag (no rollback between frames any more).
-        auto& endSt = this->m_parentSM.model().state(originalState);
-        auto& endEv = this->m_parentSM.model().events.at(endSt.eventId());
-        if(!this->createdIntervals.contains(*endSt.previousInterval()))
-          this->createdIntervals.append(*endSt.previousInterval());
-        if(!this->createdEvents.contains(endSt.eventId()))
-          this->createdEvents.append(endSt.eventId());
-        if(!this->createdStates.contains(originalState))
-          this->createdStates.append(originalState);
-        if(!this->createdTimeSyncs.contains(endEv.timeSync()))
-          this->createdTimeSyncs.append(endEv.timeSync());
+      m_dispatcher.submitQuiet(cmd);
 
-        // Remember where the end event was at press time: the drag must go
-        // past this date before an ExtendSequence can be constructed
-        // (its section duration must be strictly positive), and MoveEventMeta
-        // moves the event every frame so the live date is useless as a guard.
-        this->m_extendOrigin = endEv.date();
-
-        // Submit the ongoing ExtendSequence command via the dispatcher.
-        // On first call this constructs the command and calls redo(); on
-        // subsequent calls (from move_nothing.entered) it calls update()+redo()
-        // without any rollback between frames — eliminating the flicker.
-        if(this->currentPoint.date > this->m_extendOrigin)
-        {
-          m_dispatcher.template submit<Sequence::Command::ExtendSequence>(
-              this->m_parentSM.model(), originalState,
-              this->currentPoint.date, this->currentPoint.y);
-        }
-      }
-      else
-      {
-        auto cmd = Scenario::Command::CreateSequence::make(
-            this->m_parentSM.context().context, this->m_parentSM.model(),
-            originalState,
-            this->currentPoint.date, this->currentPoint.y);
-
-        m_dispatcher.submitQuiet(cmd);
-
-        this->createdStates.append(cmd->createdState());
-        this->createdEvents.append(cmd->createdEvent());
-        this->createdTimeSyncs.append(cmd->createdTimeSync());
-        this->createdIntervals.append(cmd->createdInterval());
-      }
+      this->createdStates.append(cmd->createdState());
+      this->createdEvents.append(cmd->createdEvent());
+      this->createdTimeSyncs.append(cmd->createdTimeSync());
+      this->createdIntervals.append(cmd->createdInterval());
     }
   }
 

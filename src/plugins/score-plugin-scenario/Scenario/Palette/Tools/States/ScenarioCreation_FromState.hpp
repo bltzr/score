@@ -163,39 +163,6 @@ public:
       });
 
       QObject::connect(move_nothing, &QState::entered, [&]() {
-        // Extend-sequence: use the ongoing ExtendSequence command which
-        // calls update()+redo() each frame without rollback — no flicker.
-        if(this->m_parentSM.editionSettings().tool() == Tool::CreateSequence
-           && this->clickedState)
-        {
-          const auto& clickedSt
-              = this->m_parentSM.model().state(*this->clickedState);
-          if(clickedSt.previousInterval())
-          {
-            bool isExtend = false;
-            auto& prevItv = this->m_parentSM.model().intervals.at(
-                *clickedSt.previousInterval());
-            for(auto& proc : prevItv.processes)
-            {
-              if(qobject_cast<Sequence::SequenceModel*>(&proc))
-              {
-                isExtend = true;
-                break;
-              }
-            }
-            if(isExtend)
-            {
-              if(this->currentPoint.date > this->m_extendOrigin)
-              {
-                this->m_dispatcher.template submit<Sequence::Command::ExtendSequence>(
-                    this->m_parentSM.model(), *this->clickedState,
-                    this->currentPoint.date, this->currentPoint.y);
-              }
-              return;
-            }
-          }
-        }
-
         if(this->createdIntervals.empty() || this->createdEvents.empty())
         {
           this->rollback();
@@ -274,9 +241,9 @@ public:
       QObject::connect(released, &QState::entered, this, [&]() {
         // Promoted sequences: releasing a blue-+ drag from an interval's end
         // state converts that interval (its automations move to a parallel
-        // sequence branch) and/or extends the sequence to the released date,
+        // sequence branch; an old encapsulated Sequence process is migrated,
+        // curves and all) and/or extends the sequence to the released date,
         // as one undoable command. The drag's ghost interval is rolled back.
-        // Old encapsulated-Sequence hosts keep the legacy ongoing behavior.
         if(this->m_parentSM.editionSettings().tool() == Tool::CreateSequence
            && this->clickedState)
         {
@@ -285,23 +252,11 @@ public:
           if(st.previousInterval())
           {
             auto& prevItv = scenar.intervals.at(*st.previousInterval());
-            bool oldSequence = false;
-            for(auto& proc : prevItv.processes)
-            {
-              if(qobject_cast<Sequence::SequenceModel*>(&proc))
-              {
-                oldSequence = true;
-                break;
-              }
-            }
-            if(!oldSequence)
-            {
-              const TimeVal endDate = this->currentPoint.date;
-              this->rollback();
-              PromotedSequence::convertOrExtend(
-                  this->m_parentSM.context().context, scenar, prevItv, endDate);
-              return;
-            }
+            const TimeVal endDate = this->currentPoint.date;
+            this->rollback();
+            PromotedSequence::convertOrExtend(
+                this->m_parentSM.context().context, scenar, prevItv, endDate);
+            return;
           }
         }
         this->commit();
