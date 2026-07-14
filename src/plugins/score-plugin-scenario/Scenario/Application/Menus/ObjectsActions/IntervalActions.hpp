@@ -36,11 +36,16 @@ private:
 
   void on_showRacks();
   void on_hideRacks();
+  void on_convertToSequence();
+  void on_extendSequence();
 
   ScenarioApplicationPlugin* m_parent{};
   QAction* m_addProcess{};
 
   QAction* m_hideRacks{};
   QAction* m_showRacks{};
+
+  QAction* m_convertToSequence{};
+  QAction* m_extendSequence{};
 };
 }
