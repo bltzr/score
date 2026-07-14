@@ -249,13 +249,22 @@ public:
         {
           auto& scenar = this->m_parentSM.model();
           auto& st = scenar.state(*this->clickedState);
+          const TimeVal endDate = this->currentPoint.date;
           if(st.previousInterval())
           {
             auto& prevItv = scenar.intervals.at(*st.previousInterval());
-            const TimeVal endDate = this->currentPoint.date;
             this->rollback();
             PromotedSequence::convertOrExtend(
                 this->m_parentSM.context().context, scenar, prevItv, endDate);
+            return;
+          }
+          else
+          {
+            // Bare state: immediately create a promoted sequence, seeded
+            // from the state's parameters (ramps to current device values).
+            this->rollback();
+            PromotedSequence::createFromState(
+                this->m_parentSM.context().context, scenar, st, endDate);
             return;
           }
         }

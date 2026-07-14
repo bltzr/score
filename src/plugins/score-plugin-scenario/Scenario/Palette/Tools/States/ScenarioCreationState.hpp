@@ -185,15 +185,14 @@ protected:
     else
     {
       // Promoted sequences: the drag always shows a plain creation ghost;
-      // conversion / migration / extension happens in one command at release
-      // (ScenarioCreation_FromState's released handler). Old encapsulated
-      // Sequence hosts are migrated there too — no ongoing-extend any more.
-      auto cmd = Scenario::Command::CreateSequence::make(
-          this->m_parentSM.context().context, this->m_parentSM.model(),
-          originalState,
-          this->currentPoint.date, this->currentPoint.y);
+      // creation / conversion / migration / extension happens in one command
+      // at release (ScenarioCreation_FromState's released handler). No old
+      // Sequence process is ever created any more.
+      auto cmd = new Scenario::Command::CreateInterval_State_Event_TimeSync{
+          this->m_scenario, originalState, this->currentPoint.date,
+          this->currentPoint.y, false};
 
-      m_dispatcher.submitQuiet(cmd);
+      m_dispatcher.submit(cmd);
 
       this->createdStates.append(cmd->createdState());
       this->createdEvents.append(cmd->createdEvent());

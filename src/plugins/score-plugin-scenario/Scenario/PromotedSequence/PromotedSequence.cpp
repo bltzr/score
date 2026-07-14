@@ -5,26 +5,45 @@
 #include "RewireIntervalEnd.hpp"
 #include "SetFlexible.hpp"
 
+#include <Process/Commands/EditPort.hpp>
 #include <Process/ExpandMode.hpp>
+#include <Process/State/MessageNode.hpp>
 
 #include <State/Message.hpp>
 #include <State/ValueConversion.hpp>
 
+#include <Device/Address/AddressSettings.hpp>
+#include <Device/Node/DeviceNode.hpp>
+
+#include <Explorer/DocumentPlugin/DeviceDocumentPlugin.hpp>
+#include <Explorer/DocumentPlugin/NodeUpdateProxy.hpp>
+
 #include <Curve/Segment/Linear/LinearSegment.hpp>
 
 #include <Automation/AutomationModel.hpp>
-#include <Automation/Commands/InitAutomation.hpp>
 #include <Automation/AutomationProcessMetadata.hpp>
+#include <Automation/Commands/InitAutomation.hpp>
+
+#include <Color/GradientMetadata.hpp>
+#include <Color/GradientModel.hpp>
+#include <Color/GradientPresenter.hpp>
 
 #include <Scenario/Commands/CommandAPI.hpp>
 #include <Scenario/Commands/Scenario/Displacement/MoveEventMeta.hpp>
 #include <Scenario/Document/Event/EventModel.hpp>
 #include <Scenario/Document/Interval/IntervalModel.hpp>
+#include <Scenario/Document/State/ItemModel/MessageItemModel.hpp>
 #include <Scenario/Document/State/StateModel.hpp>
 #include <Scenario/Document/TimeSync/TimeSyncModel.hpp>
 #include <Scenario/Process/Algorithms/Accessors.hpp>
 #include <Scenario/Process/ScenarioModel.hpp>
 #include <Scenario/Sequence/SequenceModel.hpp>
+
+#include <ossia/network/common/destination_qualifiers.hpp>
+#include <ossia/network/dataspace/color.hpp>
+#include <ossia/network/dataspace/dataspace_variant_visitors.hpp>
+#include <ossia/network/dataspace/dataspace_visitors.hpp>
+#include <ossia/network/value/value_conversion.hpp>
 
 namespace Scenario::PromotedSequence
 {
@@ -68,19 +87,69 @@ static double realValue(const Automation::ProcessModel& a, double normY)
   return a.min() + normY * (a.max() - a.min());
 }
 
-// One flat linear segment at normalized value v.
-static std::vector<Curve::SegmentData> flatSegments(double v)
+// One linear segment from v0 to v1 (flat when equal).
+static std::vector<Curve::SegmentData> rampSegments(double v0, double v1)
 {
   std::vector<Curve::SegmentData> segs;
   segs.push_back(Curve::SegmentData{
       Id<Curve::SegmentModel>{0},
-      Curve::Point{0., v},
-      Curve::Point{1., v},
+      Curve::Point{0., v0},
+      Curve::Point{1., v1},
       {},
       {},
       Metadata<ConcreteKey_k, Curve::LinearSegment>::get(),
       QVariant::fromValue(Curve::LinearSegmentData{})});
   return segs;
+}
+
+// ---- color helpers (mirroring the old sequence process) ----
+
+static const ossia::color_u* colorUnit(const State::AddressAccessor& addr)
+{
+  return addr.qualifiers.get().unit.v.target<ossia::color_u>();
+}
+
+struct color_to_qcolor
+{
+  template <typename Color>
+  QColor operator()(const typename Color::value_type& value, const Color&)
+  {
+    auto rgba = ossia::rgba{ossia::strong_value<Color>{value}};
+    auto& col = rgba.dataspace_value;
+    return QColor::fromRgbF((qreal)col[0], (qreal)col[1], (qreal)col[2], (qreal)col[3]);
+  }
+
+  template <typename... Args>
+  QColor operator()(Args&&...)
+  {
+    return QColor{};
+  }
+};
+
+static QColor valueToColor(const ossia::value& v, const ossia::color_u& u)
+{
+  QColor c = ossia::apply(color_to_qcolor{}, v.v, u);
+  if(!c.isValid())
+  {
+    const ossia::value coerced{ossia::convert<ossia::vec4f>(v)};
+    c = ossia::apply(color_to_qcolor{}, coerced.v, u);
+  }
+  return c.isValid() ? c : QColor::fromRgbF(0., 0., 0., 1.);
+}
+
+static ossia::value colorToValue(const QColor& c, const ossia::color_u& u)
+{
+  ossia::rgba col{
+      (float)c.redF(), (float)c.greenF(), (float)c.blueF(), (float)c.alphaF()};
+  return ossia::to_value(ossia::convert(col, ossia::unit_t{u}));
+}
+
+static QColor gradientBoundaryColor(const Gradient::ProcessModel& g, bool end)
+{
+  const auto& stops = g.gradient();
+  if(stops.empty())
+    return QColor::fromRgbF(0., 0., 0., 1.);
+  return end ? stops.rbegin()->second : stops.begin()->second;
 }
 
 // ---- structure walking ----
@@ -162,20 +231,57 @@ locateFromHost(const ProcessModel& scenar, const IntervalModel& h)
   return std::nullopt;
 }
 
-// ---- the two operations, composable into a single macro ----
+// ---- lane creation helpers ----
+
+// Create an automation lane in a section: address, domain, linear ramp.
+static void addAutomationLane(
+    Scenario::Command::Macro& m, const ProcessModel& scenar,
+    const IntervalModel& section, const State::AddressAccessor& addr, double min,
+    double max, double v0Norm, double v1Norm)
+{
+  auto created = m.createProcess(
+      section, Metadata<ConcreteKey_k, Automation::ProcessModel>::get(), QString{},
+      QPointF{});
+  if(!created)
+    return;
+  auto& newAuto = *safe_cast<Automation::ProcessModel*>(created);
+  m.submit(new Automation::InitAutomation{
+      newAuto, addr, min, max, rampSegments(v0Norm, v1Norm)});
+  m.addLayerInNewSlot(section, *created);
+}
+
+// Create a gradient lane in a section.
+static void addGradientLane(
+    Scenario::Command::Macro& m, const ProcessModel& scenar,
+    const IntervalModel& section, const State::AddressAccessor& addr,
+    const Gradient::ProcessModel::gradient_colors& stops)
+{
+  auto created = m.createProcess(
+      section, Metadata<ConcreteKey_k, Gradient::ProcessModel>::get(), QString{},
+      QPointF{});
+  if(!created)
+    return;
+  auto& grad = *safe_cast<Gradient::ProcessModel*>(created);
+  m.submit(new Process::ChangePortAddress{*grad.outlet, addr});
+  m.submit(new Gradient::ChangeGradient{grad, stops});
+  m.addLayerInNewSlot(section, *created);
+}
+
+// ---- the operations, composable into a single macro ----
 
 // Convert: fan two new states off the host's start/end events, create the
-// first section between them, move the host's automations into it, make the
-// host flexible, record boundary values on the shared states.
+// first section between them, move the host's automations and gradients into
+// it, make the host flexible, record boundary values on the shared states.
 // Returns the created section.
 static IntervalModel& convertInto(
     Scenario::Command::Macro& m, const ProcessModel& scenar, const IntervalModel& host)
 {
-  std::vector<Id<Process::ProcessModel>> autos;
+  std::vector<Id<Process::ProcessModel>> lanes;
   for(auto& proc : host.processes)
   {
-    if(qobject_cast<const Automation::ProcessModel*>(&proc))
-      autos.push_back(proc.id());
+    if(qobject_cast<const Automation::ProcessModel*>(&proc)
+       || qobject_cast<const Gradient::ProcessModel*>(&proc))
+      lanes.push_back(proc.id());
   }
 
   const double y = std::min(0.9, host.heightPercentage() + 0.1);
@@ -186,8 +292,10 @@ static IntervalModel& convertInto(
   auto& s1 = m.createState(scenar, endEv.id(), y);
   auto& b1 = m.createInterval(scenar, s0.id(), s1.id());
 
-  for(auto& id : autos)
+  for(auto& id : lanes)
     m.moveProcess(host, b1, id);
+  if(!lanes.empty())
+    m.showRack(b1);
 
   // The parallel branch: plays at least its nominal length, then keeps
   // playing until the shared end sync fires.
@@ -203,6 +311,17 @@ static IntervalModel& convertInto(
           a->address(), ossia::value{float(realValue(*a, curveStartY(*a)))}});
       endMsgs.push_back(State::Message{
           a->address(), ossia::value{float(realValue(*a, curveEndY(*a)))}});
+    }
+    else if(auto g = qobject_cast<const Gradient::ProcessModel*>(&proc))
+    {
+      const auto& addr = g->address();
+      if(auto u = colorUnit(addr))
+      {
+        startMsgs.push_back(
+            State::Message{addr, colorToValue(gradientBoundaryColor(*g, false), *u)});
+        endMsgs.push_back(
+            State::Message{addr, colorToValue(gradientBoundaryColor(*g, true), *u)});
+      }
     }
   }
   if(!startMsgs.empty())
@@ -249,30 +368,38 @@ static void extendInto(
   State::MessageList isMsgs;
   for(auto& proc : last.processes)
   {
-    auto a = qobject_cast<const Automation::ProcessModel*>(&proc);
-    if(!a)
-      continue;
-
-    const double vNorm = curveEndY(*a);
-    auto created = m.createProcess(
-        bNew, Metadata<ConcreteKey_k, Automation::ProcessModel>::get(), QString{},
-        QPointF{});
-    if(!created)
-      continue;
-    auto& newAuto = *safe_cast<Automation::ProcessModel*>(created);
-    m.submit(new Automation::InitAutomation{
-        newAuto, a->address(), a->min(), a->max(), flatSegments(vNorm)});
-
-    isMsgs.push_back(
-        State::Message{a->address(), ossia::value{float(realValue(*a, vNorm))}});
+    if(auto a = qobject_cast<const Automation::ProcessModel*>(&proc))
+    {
+      const double vNorm = curveEndY(*a);
+      addAutomationLane(
+          m, scenar, bNew, a->address(), a->min(), a->max(), vNorm, vNorm);
+      isMsgs.push_back(
+          State::Message{a->address(), ossia::value{float(realValue(*a, vNorm))}});
+    }
+    else if(auto g = qobject_cast<const Gradient::ProcessModel*>(&proc))
+    {
+      const auto& addr = g->address();
+      auto u = colorUnit(addr);
+      if(!u)
+        continue;
+      const QColor c = gradientBoundaryColor(*g, true);
+      Gradient::ProcessModel::gradient_colors stops;
+      stops.insert(std::make_pair(0., c));
+      addGradientLane(m, scenar, bNew, addr, stops);
+      isMsgs.push_back(State::Message{addr, colorToValue(c, *u)});
+    }
   }
   if(!isMsgs.empty())
+  {
     m.addMessages(isState, std::move(isMsgs));
+    m.showRack(bNew);
+  }
 }
 
 // Migrate an old encapsulated Sequence process into the promoted form:
-// recreate its internal sections/ISes as native elements (full curve copy),
-// remove the old process, make the host flexible. Returns the new sections.
+// recreate its internal sections/ISes as native elements (full curve and
+// gradient copy), remove the old process, make the host flexible.
+// Returns the new sections.
 static std::vector<IntervalModel*> migrateInto(
     Scenario::Command::Macro& m, const ProcessModel& scenar, const IntervalModel& host,
     const Sequence::SequenceModel& seq)
@@ -316,29 +443,44 @@ static std::vector<IntervalModel*> migrateInto(
     State::MessageList startMsgs, endMsgs;
     for(auto& proc : sec.processes)
     {
-      auto a = qobject_cast<const Automation::ProcessModel*>(&proc);
-      if(!a)
-        continue; // V1: gradients/other section processes are not migrated
+      if(auto a = qobject_cast<const Automation::ProcessModel*>(&proc))
+      {
+        auto created = m.createProcess(
+            newItv, Metadata<ConcreteKey_k, Automation::ProcessModel>::get(), QString{},
+            QPointF{});
+        if(!created)
+          continue;
+        auto& newAuto = *safe_cast<Automation::ProcessModel*>(created);
+        m.submit(new Automation::InitAutomation{
+            newAuto, a->address(), a->min(), a->max(), a->curve().toCurveData()});
+        m.addLayerInNewSlot(newItv, *created);
 
-      auto created = m.createProcess(
-          newItv, Metadata<ConcreteKey_k, Automation::ProcessModel>::get(), QString{},
-          QPointF{});
-      if(!created)
-        continue;
-      auto& newAuto = *safe_cast<Automation::ProcessModel*>(created);
-      m.submit(new Automation::InitAutomation{
-          newAuto, a->address(), a->min(), a->max(), a->curve().toCurveData()});
-
-      if(k == 0)
-        startMsgs.push_back(State::Message{
-            a->address(), ossia::value{float(realValue(*a, curveStartY(*a)))}});
-      endMsgs.push_back(State::Message{
-          a->address(), ossia::value{float(realValue(*a, curveEndY(*a)))}});
+        if(k == 0)
+          startMsgs.push_back(State::Message{
+              a->address(), ossia::value{float(realValue(*a, curveStartY(*a)))}});
+        endMsgs.push_back(State::Message{
+            a->address(), ossia::value{float(realValue(*a, curveEndY(*a)))}});
+      }
+      else if(auto g = qobject_cast<const Gradient::ProcessModel*>(&proc))
+      {
+        const auto& addr = g->address();
+        auto u = colorUnit(addr);
+        addGradientLane(m, scenar, newItv, addr, g->gradient());
+        if(u)
+        {
+          if(k == 0)
+            startMsgs.push_back(State::Message{
+                addr, colorToValue(gradientBoundaryColor(*g, false), *u)});
+          endMsgs.push_back(
+              State::Message{addr, colorToValue(gradientBoundaryColor(*g, true), *u)});
+        }
+      }
     }
     if(!startMsgs.empty())
       m.addMessages(*prev, std::move(startMsgs));
     if(!endMsgs.empty())
       m.addMessages(*next, std::move(endMsgs));
+    m.showRack(newItv);
 
     prev = next;
   }
@@ -474,6 +616,132 @@ bool convertOrExtend(
     st.sections = {&b1};
     extendInto(m, scenar, st, newEndDate);
   }
+
+  m.commit();
+  return true;
+}
+
+bool createFromState(
+    const score::DocumentContext& ctx, const ProcessModel& scenar,
+    const StateModel& startState, TimeVal endDate)
+{
+  using namespace Scenario::Command;
+
+  if(startState.nextInterval())
+    return false;
+
+  auto& startEv = scenar.events.at(startState.eventId());
+  if(endDate <= startEv.date() + TimeVal::fromMsecs(10))
+    return false;
+
+  Macro m{new CreatePromotedSequence, ctx};
+
+  // The parallel branch, empty for now.
+  auto& host = m.createIntervalAfter(
+      scenar, startState.id(),
+      Scenario::Point{endDate, startState.heightPercentage()});
+
+  // The sequence branch: one section between fresh states on both events.
+  auto& b1 = convertInto(m, scenar, host);
+
+  // Seed one lane per parameter of the start state, ramping from the state's
+  // value to the current device value — like the old process did.
+  auto devPlugin = ctx.findPlugin<Explorer::DeviceDocumentPlugin>();
+  const auto startMessages = Process::flatten(startState.messages().rootNode());
+
+  State::MessageList startMsgs, endMsgs;
+  for(const auto& msg : startMessages)
+  {
+    const ossia::color_u* cu = colorUnit(msg.address);
+    const bool isVec = msg.value.get_type() == ossia::val_type::VEC2F
+                       || msg.value.get_type() == ossia::val_type::VEC3F
+                       || msg.value.get_type() == ossia::val_type::VEC4F;
+    if(!ossia::is_numeric(msg.value) && !cu && !isVec)
+      continue;
+
+    // Current device value = the ramp's destination.
+    ossia::value endVal = msg.value;
+    const Device::Node* node{};
+    if(devPlugin)
+    {
+      node = Device::try_getNodeFromAddress(devPlugin->rootNode(), msg.address.address);
+      if(node && node->is<Device::AddressSettings>())
+      {
+        devPlugin->updateProxy.refreshRemoteValue(msg.address.address);
+        endVal = node->get<Device::AddressSettings>().value;
+      }
+    }
+
+    if(cu)
+    {
+      Gradient::ProcessModel::gradient_colors stops;
+      stops.insert(std::make_pair(0., valueToColor(msg.value, *cu)));
+      stops.insert(std::make_pair(1., valueToColor(endVal, *cu)));
+      addGradientLane(m, scenar, b1, msg.address, stops);
+      startMsgs.push_back(State::Message{msg.address, msg.value});
+      endMsgs.push_back(State::Message{msg.address, endVal});
+      continue;
+    }
+
+    // Domain: from the device node when available, else span of the values.
+    auto makeLane = [&](const State::AddressAccessor& addr, double v0, double v1) {
+      double min = std::min(v0, v1), max = std::max(v0, v1);
+      if(node && node->is<Device::AddressSettings>())
+      {
+        const auto& dom = node->get<Device::AddressSettings>().domain.get();
+        const auto dmin = dom.get_min(), dmax = dom.get_max();
+        if(dmin.valid() && dmax.valid())
+        {
+          min = std::min(min, double(ossia::convert<float>(dmin)));
+          max = std::max(max, double(ossia::convert<float>(dmax)));
+        }
+      }
+      if(max - min < 1e-9)
+      {
+        min = std::min(min, 0.);
+        max = std::max(max, 1.);
+      }
+      const double n0 = (v0 - min) / (max - min);
+      const double n1 = (v1 - min) / (max - min);
+      addAutomationLane(m, scenar, b1, addr, min, max, n0, n1);
+      startMsgs.push_back(State::Message{addr, ossia::value{float(v0)}});
+      endMsgs.push_back(State::Message{addr, ossia::value{float(v1)}});
+    };
+
+    if(isVec)
+    {
+      const int n = msg.value.get_type() == ossia::val_type::VEC2F   ? 2
+                    : msg.value.get_type() == ossia::val_type::VEC3F ? 3
+                                                                     : 4;
+      for(int i = 0; i < n; ++i)
+      {
+        auto sub = msg.address;
+        auto& acc = sub.qualifiers.get().accessors;
+        acc.clear();
+        acc.push_back(i);
+
+        const auto v0 = ossia::get_value_at_index(msg.value, {i});
+        const auto v1 = ossia::get_value_at_index(endVal, {i});
+        if(!v0.valid() || !v1.valid())
+          continue;
+        makeLane(sub, ossia::convert<float>(v0), ossia::convert<float>(v1));
+      }
+      continue;
+    }
+
+    makeLane(
+        msg.address, ossia::convert<float>(msg.value), ossia::convert<float>(endVal));
+  }
+
+  // Boundary values on the shared states.
+  auto& s0 = Scenario::startState(b1, scenar);
+  auto& s1 = Scenario::endState(b1, scenar);
+  if(!startMsgs.empty())
+    m.addMessages(s0, std::move(startMsgs));
+  if(!endMsgs.empty())
+    m.addMessages(s1, std::move(endMsgs));
+  if(!b1.processes.empty())
+    m.showRack(b1);
 
   m.commit();
   return true;
