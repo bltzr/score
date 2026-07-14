@@ -161,6 +161,114 @@ locateFromHost(const ProcessModel& scenar, const IntervalModel& h)
   return std::nullopt;
 }
 
+// ---- the two operations, composable into a single macro ----
+
+// Convert: fan two new states off the host's start/end events, create the
+// first section between them, move the host's automations into it, make the
+// host flexible, record boundary values on the shared states.
+// Returns the created section.
+static IntervalModel& convertInto(
+    Scenario::Command::Macro& m, const ProcessModel& scenar, const IntervalModel& host)
+{
+  std::vector<Id<Process::ProcessModel>> autos;
+  for(auto& proc : host.processes)
+  {
+    if(qobject_cast<const Automation::ProcessModel*>(&proc))
+      autos.push_back(proc.id());
+  }
+
+  const double y = std::min(0.9, host.heightPercentage() + 0.1);
+  auto& startEv = Scenario::startEvent(host, scenar);
+  auto& endEv = Scenario::endEvent(host, scenar);
+
+  auto& s0 = m.createState(scenar, startEv.id(), y);
+  auto& s1 = m.createState(scenar, endEv.id(), y);
+  auto& b1 = m.createInterval(scenar, s0.id(), s1.id());
+
+  for(auto& id : autos)
+    m.moveProcess(host, b1, id);
+
+  // The parallel branch: plays at least its nominal length, then keeps
+  // playing until the shared end sync fires.
+  m.submit(new Scenario::Command::SetFlexible{host, host.duration.defaultDuration()});
+
+  // The IS-boundary values live on the shared states.
+  State::MessageList startMsgs, endMsgs;
+  for(auto& proc : b1.processes)
+  {
+    if(auto a = qobject_cast<const Automation::ProcessModel*>(&proc))
+    {
+      startMsgs.push_back(State::Message{
+          a->address(), ossia::value{float(realValue(*a, curveStartY(*a)))}});
+      endMsgs.push_back(State::Message{
+          a->address(), ossia::value{float(realValue(*a, curveEndY(*a)))}});
+    }
+  }
+  if(!startMsgs.empty())
+    m.addMessages(s0, std::move(startMsgs));
+  if(!endMsgs.empty())
+    m.addMessages(s1, std::move(endMsgs));
+
+  return b1;
+}
+
+// Extend: new IS at the current end date, rewire the last section onto it,
+// push the shared end sync to newEndDate, create the new section, continue
+// every parameter flat from its boundary value.
+static void extendInto(
+    Scenario::Command::Macro& m, const ProcessModel& scenar, const Structure& st,
+    TimeVal newEndDate)
+{
+  auto& host = *st.host;
+  auto& last = *st.sections.back();
+  auto& tailState = Scenario::endState(last, scenar); // on the shared end sync
+  auto& hostEndEv = Scenario::endEvent(host, scenar);
+  auto& endSync = Scenario::endTimeSync(host, scenar);
+
+  const TimeVal endDate = endSync.date();
+  const double yChain = last.heightPercentage();
+
+  // 1. A new IS where the old end was.
+  auto [isSync, isEv, isState]
+      = m.createDot(scenar, Scenario::Point{endDate, yChain});
+
+  // 2. The last section now ends at the IS instead of the shared end.
+  m.submit(new Scenario::Command::RewireIntervalEnd{scenar, last, isState});
+
+  // 3. Push the shared end forward; the parallel branch stretches
+  //    (GrowShrink: its content keeps its absolute timing).
+  m.submit(new Scenario::Command::MoveEventMeta{
+      scenar, hostEndEv.id(), newEndDate, host.heightPercentage(),
+      ExpandMode::GrowShrink, LockMode::Free});
+
+  // 4. New section between the IS and the shared end.
+  auto& bNew = m.createInterval(scenar, isState.id(), tailState.id());
+
+  // 5. Continue every parameter from its boundary value (flat, same domain).
+  State::MessageList isMsgs;
+  for(auto& proc : last.processes)
+  {
+    auto a = qobject_cast<const Automation::ProcessModel*>(&proc);
+    if(!a)
+      continue;
+
+    const double vNorm = curveEndY(*a);
+    auto created = m.createProcess(
+        bNew, Metadata<ConcreteKey_k, Automation::ProcessModel>::get(), QString{},
+        QPointF{});
+    if(!created)
+      continue;
+    auto& newAuto = *safe_cast<Automation::ProcessModel*>(created);
+    m.submit(new Automation::InitAutomation{
+        newAuto, a->address(), a->min(), a->max(), flatSegments(vNorm)});
+
+    isMsgs.push_back(
+        State::Message{a->address(), ossia::value{float(realValue(*a, vNorm))}});
+  }
+  if(!isMsgs.empty())
+    m.addMessages(isState, std::move(isMsgs));
+}
+
 }
 
 std::optional<Structure> locate(const ProcessModel& scenar, const IntervalModel& any)
@@ -225,122 +333,37 @@ std::optional<Structure> locate(const ProcessModel& scenar, const IntervalModel&
   return std::nullopt;
 }
 
-bool convertToSequence(
+bool convertOrExtend(
     const score::DocumentContext& ctx, const ProcessModel& scenar,
-    const IntervalModel& host)
+    const IntervalModel& member, TimeVal newEndDate)
 {
-  // Already part of a sequence? Bail.
-  if(locate(scenar, host))
-    return false;
-
-  // Collect the automations to move into the sequence branch.
-  std::vector<Id<Process::ProcessModel>> autos;
-  for(auto& proc : host.processes)
-  {
-    if(qobject_cast<const Automation::ProcessModel*>(&proc))
-      autos.push_back(proc.id());
-  }
-  if(autos.empty())
-    return false;
-
   using namespace Scenario::Command;
+
+  if(auto st = locate(scenar, member))
+  {
+    // Already a sequence: extend to the released date.
+    auto& endSync = Scenario::endTimeSync(*st->host, scenar);
+    if(newEndDate <= endSync.date() + TimeVal::fromMsecs(1))
+      return false;
+
+    Macro m{new ExtendPromotedSequence, ctx};
+    extendInto(m, scenar, *st, newEndDate);
+    m.commit();
+    return true;
+  }
+
+  // Not a sequence yet: convert, and extend if the drag went beyond the end.
   Macro m{new ConvertToPromotedSequence, ctx};
+  auto& b1 = convertInto(m, scenar, member);
 
-  const double y = std::min(0.9, host.heightPercentage() + 0.1);
-  auto& startEv = Scenario::startEvent(host, scenar);
-  auto& endEv = Scenario::endEvent(host, scenar);
-
-  auto& s0 = m.createState(scenar, startEv.id(), y);
-  auto& s1 = m.createState(scenar, endEv.id(), y);
-  auto& b1 = m.createInterval(scenar, s0.id(), s1.id());
-
-  for(auto& id : autos)
-    m.moveProcess(host, b1, id);
-
-  // The parallel branch: plays at least its nominal length, then keeps
-  // playing until the shared end sync fires.
-  m.submit(new SetFlexible{host, host.duration.defaultDuration()});
-
-  // The IS-boundary values live on the shared states.
-  State::MessageList startMsgs, endMsgs;
-  for(auto& proc : b1.processes)
+  auto& endSync = Scenario::endTimeSync(member, scenar);
+  if(newEndDate > endSync.date() + TimeVal::fromMsecs(10))
   {
-    if(auto a = qobject_cast<const Automation::ProcessModel*>(&proc))
-    {
-      startMsgs.push_back(State::Message{
-          a->address(), ossia::value{float(realValue(*a, curveStartY(*a)))}});
-      endMsgs.push_back(State::Message{
-          a->address(), ossia::value{float(realValue(*a, curveEndY(*a)))}});
-    }
+    Structure st;
+    st.host = const_cast<IntervalModel*>(&member);
+    st.sections = {&b1};
+    extendInto(m, scenar, st, newEndDate);
   }
-  if(!startMsgs.empty())
-    m.addMessages(s0, std::move(startMsgs));
-  if(!endMsgs.empty())
-    m.addMessages(s1, std::move(endMsgs));
-
-  m.commit();
-  return true;
-}
-
-bool extendSequence(
-    const score::DocumentContext& ctx, const ProcessModel& scenar,
-    const IntervalModel& anyMember)
-{
-  auto st = locate(scenar, anyMember);
-  if(!st)
-    return false;
-
-  auto& host = *st->host;
-  auto& last = *st->sections.back();
-  auto& tailState = Scenario::endState(last, scenar); // on the shared end sync
-  auto& hostEndEv = Scenario::endEvent(host, scenar);
-  auto& endSync = Scenario::endTimeSync(host, scenar);
-
-  const TimeVal endDate = endSync.date();
-  const TimeVal ext = last.duration.defaultDuration();
-  const double yChain = last.heightPercentage();
-
-  using namespace Scenario::Command;
-  Macro m{new ExtendPromotedSequence, ctx};
-
-  // 1. A new IS where the old end was.
-  auto [isSync, isEv, isState] = m.createDot(scenar, Scenario::Point{endDate, yChain});
-
-  // 2. The last section now ends at the IS instead of the shared end.
-  m.submit(new RewireIntervalEnd{scenar, last, isState});
-
-  // 3. Push the shared end forward; the parallel branch stretches
-  //    (GrowShrink: its content keeps its absolute timing).
-  m.submit(new MoveEventMeta{
-      scenar, hostEndEv.id(), endDate + ext, host.heightPercentage(),
-      ExpandMode::GrowShrink, LockMode::Free});
-
-  // 4. New section between the IS and the shared end.
-  auto& bNew = m.createInterval(scenar, isState.id(), tailState.id());
-
-  // 5. Continue every parameter from its boundary value (flat, same domain).
-  State::MessageList isMsgs;
-  for(auto& proc : last.processes)
-  {
-    auto a = qobject_cast<const Automation::ProcessModel*>(&proc);
-    if(!a)
-      continue;
-
-    const double vNorm = curveEndY(*a);
-    auto created = m.createProcess(
-        bNew, Metadata<ConcreteKey_k, Automation::ProcessModel>::get(), QString{},
-        QPointF{});
-    if(!created)
-      continue;
-    auto& newAuto = *safe_cast<Automation::ProcessModel*>(created);
-    m.submit(new Automation::InitAutomation{
-        newAuto, a->address(), a->min(), a->max(), flatSegments(vNorm)});
-
-    isMsgs.push_back(
-        State::Message{a->address(), ossia::value{float(realValue(*a, vNorm))}});
-  }
-  if(!isMsgs.empty())
-    m.addMessages(isState, std::move(isMsgs));
 
   m.commit();
   return true;

@@ -15,6 +15,7 @@
 #include <Scenario/Palette/Transitions/StateTransitions.hpp>
 #include <Scenario/Palette/Transitions/TimeSyncTransitions.hpp>
 #include <Scenario/Process/Algorithms/Accessors.hpp>
+#include <Scenario/PromotedSequence/PromotedSequence.hpp>
 
 #include <QApplication>
 #include <QFinalState>
@@ -270,7 +271,41 @@ public:
             this->m_scenario, this->createdStates.last(), this->currentPoint.y);
       });
 
-      QObject::connect(released, &QState::entered, this, &Creation_FromState::commit);
+      QObject::connect(released, &QState::entered, this, [&]() {
+        // Promoted sequences: releasing a blue-+ drag from an interval's end
+        // state converts that interval (its automations move to a parallel
+        // sequence branch) and/or extends the sequence to the released date,
+        // as one undoable command. The drag's ghost interval is rolled back.
+        // Old encapsulated-Sequence hosts keep the legacy ongoing behavior.
+        if(this->m_parentSM.editionSettings().tool() == Tool::CreateSequence
+           && this->clickedState)
+        {
+          auto& scenar = this->m_parentSM.model();
+          auto& st = scenar.state(*this->clickedState);
+          if(st.previousInterval())
+          {
+            auto& prevItv = scenar.intervals.at(*st.previousInterval());
+            bool oldSequence = false;
+            for(auto& proc : prevItv.processes)
+            {
+              if(qobject_cast<Sequence::SequenceModel*>(&proc))
+              {
+                oldSequence = true;
+                break;
+              }
+            }
+            if(!oldSequence)
+            {
+              const TimeVal endDate = this->currentPoint.date;
+              this->rollback();
+              PromotedSequence::convertOrExtend(
+                  this->m_parentSM.context().context, scenar, prevItv, endDate);
+              return;
+            }
+          }
+        }
+        this->commit();
+      });
     }
 
     auto rollbackState = new QState{this};

@@ -13,8 +13,6 @@
 #include <Scenario/DialogWidget/AddProcessDialog.hpp>
 #include <Scenario/Document/Interval/IntervalModel.hpp>
 #include <Scenario/Document/ScenarioDocument/ScenarioDocumentModel.hpp>
-#include <Scenario/Process/ScenarioModel.hpp>
-#include <Scenario/PromotedSequence/PromotedSequence.hpp>
 #include <Scenario/Process/ScenarioPresenter.hpp>
 #include <Scenario/Process/ScenarioView.hpp>
 
@@ -92,20 +90,6 @@ IntervalActions::IntervalActions(ScenarioApplicationPlugin* parent)
   m_hideRacks->setShortcutContext(Qt::ApplicationShortcut);
   score::setHelp(m_hideRacks, tr("Hide racks"));
   connect(m_hideRacks, &QAction::triggered, this, &IntervalActions::on_hideRacks);
-
-  m_convertToSequence = new QAction{tr("Convert to sequence"), this};
-  score::setHelp(
-      m_convertToSequence,
-      tr("Move the interval's automations to a parallel sequence branch with "
-         "promoted, trigger-able boundary states"));
-  connect(
-      m_convertToSequence, &QAction::triggered, this,
-      &IntervalActions::on_convertToSequence);
-
-  m_extendSequence = new QAction{tr("Extend sequence"), this};
-  score::setHelp(m_extendSequence, tr("Append a section to the sequence"));
-  connect(
-      m_extendSequence, &QAction::triggered, this, &IntervalActions::on_extendSequence);
 }
 
 IntervalActions::~IntervalActions() { }
@@ -156,42 +140,10 @@ void IntervalActions::setupContextMenu(Process::LayerContextMenuManager& ctxm)
       }
       cstrSubmenu->addAction(m_showRacks);
       cstrSubmenu->addAction(m_hideRacks);
-      cstrSubmenu->addAction(m_convertToSequence);
-      cstrSubmenu->addAction(m_extendSequence);
     }
   });
 
   ctxm.insert(std::move(cm));
-}
-
-void IntervalActions::on_convertToSequence()
-{
-  auto doc = m_parent->currentDocument();
-  if(!doc)
-    return;
-  auto selected = filterSelectionByType<IntervalModel>(
-      doc->context().selectionStack.currentSelection());
-  if(selected.empty())
-    return;
-
-  auto& itv = *selected.front();
-  if(auto scenar = qobject_cast<const Scenario::ProcessModel*>(itv.parent()))
-    PromotedSequence::convertToSequence(doc->context(), *scenar, itv);
-}
-
-void IntervalActions::on_extendSequence()
-{
-  auto doc = m_parent->currentDocument();
-  if(!doc)
-    return;
-  auto selected = filterSelectionByType<IntervalModel>(
-      doc->context().selectionStack.currentSelection());
-  if(selected.empty())
-    return;
-
-  auto& itv = *selected.front();
-  if(auto scenar = qobject_cast<const Scenario::ProcessModel*>(itv.parent()))
-    PromotedSequence::extendSequence(doc->context(), *scenar, itv);
 }
 
 void IntervalActions::addProcessInInterval(

@@ -3,6 +3,8 @@
 
 #include <Scenario/Commands/ScenarioCommandFactory.hpp>
 
+#include <Process/TimeValue.hpp>
+
 #include <optional>
 #include <vector>
 
@@ -29,6 +31,10 @@ class IntervalModel;
  *    max = ∞) so it keeps playing until the shared end sync AND-fires.
  *
  * Both branches share the sequence's start and end syncs (the diamond).
+ *
+ * Entry point: dragging the blue + from an interval's end state
+ * (Tool::CreateSequence in the palette) — the first drag converts the
+ * interval and extends it to the released date; further drags extend.
  */
 namespace PromotedSequence
 {
@@ -42,19 +48,15 @@ struct Structure
 //! Purely structural — no stored identity.
 std::optional<Structure> locate(const ProcessModel& scenar, const IntervalModel& any);
 
-//! Convert an existing interval into a sequence: its automations move to a
-//! new single-section sequence branch; everything else stays in the interval,
-//! which becomes the (flexible) parallel branch.
-bool convertToSequence(
+//! The blue-+ gesture, one undoable command:
+//! - interval not yet a sequence: convert it (its automations move to a new
+//!   single-section sequence branch; everything else stays in the interval,
+//!   which becomes the flexible parallel branch), then, if newEndDate is
+//!   beyond its end, append a section up to newEndDate.
+//! - interval already a sequence member: append a section up to newEndDate.
+bool convertOrExtend(
     const score::DocumentContext& ctx, const ProcessModel& scenar,
-    const IntervalModel& host);
-
-//! Append a section at the end of the sequence branch: the old shared end
-//! becomes an intermediate IS, a new section continues each parameter from
-//! its boundary value, and the parallel branch stretches accordingly.
-bool extendSequence(
-    const score::DocumentContext& ctx, const ProcessModel& scenar,
-    const IntervalModel& anyMember);
+    const IntervalModel& member, TimeVal newEndDate);
 }
 
 namespace Command

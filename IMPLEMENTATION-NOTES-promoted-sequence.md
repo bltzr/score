@@ -1,6 +1,26 @@
 # Promoted-sequence V1 — implementation notes & decisions
 *(autonomous overnight run; every decision below is open for correction)*
 
+## ⚠ REVAMP (Pia's correction, applied): the gesture IS the blue +
+The context-menu entries are GONE. The entry point is the **blue + dragged
+from a state**, exactly like the old sequence process:
+
+- **First drag** from the end state of a plain interval: the interval is
+  **converted automatically** (automations → sequence branch; the interval
+  becomes the flexible parallel branch), and if the drag went beyond the end,
+  a section is appended up to the released date. One undoable command.
+- **Subsequent drags** from the shared end state: extend to the released date.
+- During the drag you see the normal ghost interval; it is rolled back at
+  release and replaced by the real structure.
+- Old encapsulated-Sequence documents keep the legacy ongoing-extend behavior
+  (detected by the presence of the old process — nothing breaks).
+- Extend length = wherever you release (no longer "last section's duration").
+- Conversion no longer requires automations (an empty section is fine — drop
+  parameters later).
+
+Wiring: `ScenarioCreation_FromState.hpp` release handler →
+`PromotedSequence::convertOrExtend(ctx, scenar, prevInterval, releaseDate)`.
+
 ## What exists now
 
 New code (all in `Scenario/PromotedSequence/`, plus 2 small edits to
