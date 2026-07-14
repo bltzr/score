@@ -23,10 +23,30 @@ from a state**, exactly like the old sequence process:
   processes are dropped from the sequence branch — flagged), cables into the
   old process's per-parameter outlets are lost (native per-automation outlets
   replace them).
-- Creating from a bare state still uses the legacy CreateSequence (old-style
-  process with device-value ramps) — it then gets migrated on its first
-  extension. Porting the ramp logic to a native-first creation is a clean
-  follow-up if preferred.
+- **Bare-state creation is promoted too** (Pia): blue-+ from a bare state
+  immediately creates the native diamond — parallel branch to the released
+  date + one-section sequence branch seeded with one lane per parameter of
+  the start state, ramping from the state's value to the current device value
+  (numeric; vec expanded per component; colors as Gradients), domains read
+  from the device nodes. No old-style process is ever created any more.
+- **Gradients are full sequence-branch citizens** (Pia): moved on conversion,
+  copied stops-and-all on migration, continued flat on extension, color
+  boundary values recorded on IS states in the address's own unit.
+
+## Ports & slot-sync: NOT done (needs the identity decision — discuss)
+Both old-process features are absent and both are gated on the same design
+question (who owns sequence-wide behavior in the native world):
+- **Per-parameter ports** (one outlet per parameter for the whole sequence):
+  natively each section lane exposes its own outlet. A unified port needs an
+  owner object — options: outlets on the parallel branch, a thin wrapper
+  process, or per-section cables managed automatically. JM's dynamic-port
+  work is relevant. → discuss.
+- **Slot-sync across sections** (move/resize a slot in one section mirrors to
+  all): the old watchSection/mirrorRackLayout machinery needs a live owner;
+  candidates: a document plugin that recognizes promoted structures and
+  mirrors racks, or command-level interception. The old logic itself is
+  largely reusable. → discuss. Meanwhile: new sections are created with one
+  slot per lane (one-shot parity at creation; no live sync).
 - Extend length = wherever you release (no longer "last section's duration").
 - Conversion no longer requires automations (an empty section is fine — drop
   parameters later).
