@@ -33,7 +33,25 @@ from a state**, exactly like the old sequence process:
   copied stops-and-all on migration, continued flat on extension, color
   boundary values recorded on IS states in the address's own unit.
 
-## Ports & slot-sync: NOT done (needs the identity decision — discuss)
+## Ports & slot-sync: DONE via the SequenceAnchor (Pia's owner decision)
+Pia settled the identity question: **the parallel branch owns sequence-wide
+behavior** ("there will always be one"). Realized as a thin `SequenceAnchor`
+process living in the parallel branch (option b2 — zero core-model changes):
+- **Per-parameter ports**: the anchor exposes one (inlet, outlet) pair per
+  parameter; section lanes are auto-cabled into the inlets by every gesture
+  macro; users cable outward from the outlets — one cable per parameter for
+  the whole sequence. Ports keep identity across namespace changes so cables
+  survive; execution is a trivial forwarding node.
+- **Live slot-sync**: the old watchSection/mirrorRackLayout machinery lives
+  in the anchor now (lanes matched by address; orphan lanes keep their slot;
+  mirroring deferred past command signal bursts; watchers re-derived after
+  extensions).
+- **Stacking rule**: the sequence branch is created ABOVE the parallel branch
+  (IS verticals stay short). Full "two slots of one object" grouped
+  move/selection remains presenter work — the one UI piece still open.
+
+### Superseded (kept for history):
+(old text) Ports & slot-sync were absent pending the identity decision
 Both old-process features are absent and both are gated on the same design
 question (who owns sequence-wide behavior in the native world):
 - **Per-parameter ports** (one outlet per parameter for the whole sequence):
