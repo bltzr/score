@@ -86,3 +86,9 @@ class CreatePromotedSequence final : public score::AggregateCommand
 };
 }
 }
+
+namespace Scenario::PromotedSequence
+{
+//! In-app structural self-test (env SCORE_PROMOTED_SEQ_SELFTEST); exits the app.
+void runSelfTest();
+}

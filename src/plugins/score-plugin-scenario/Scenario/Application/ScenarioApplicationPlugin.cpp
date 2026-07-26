@@ -2,6 +2,9 @@
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include "ScenarioApplicationPlugin.hpp"
 
+#include <Scenario/PromotedSequence/PromotedSequence.hpp>
+#include <QTimer>
+
 #include "Menus/TransportActions.hpp"
 
 #include <Process/ApplicationPlugin.hpp>
@@ -232,6 +235,10 @@ ScenarioApplicationPlugin::ScenarioApplicationPlugin(
 
 void ScenarioApplicationPlugin::initialize()
 {
+  // Structural self-test for promoted sequences (exits the app when done).
+  if(qEnvironmentVariableIsSet("SCORE_PROMOTED_SEQ_SELFTEST"))
+    QTimer::singleShot(3000, [] { PromotedSequence::runSelfTest(); });
+
   // Needs a delayed init because it scans all the registered factories
   {
     auto& droppers = context.interfaces<Scenario::DropHandlerList>();

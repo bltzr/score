@@ -400,6 +400,7 @@ set(SRCS ${SRCS}
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Sequence/SequencePresenter.cpp"
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Sequence/SequenceView.cpp"
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/PromotedSequence/PromotedSequence.cpp"
+"${CMAKE_CURRENT_SOURCE_DIR}/Scenario/PromotedSequence/SelfTest.cpp"
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/PromotedSequence/SequenceAnchor.cpp"
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/PromotedSequence/SequenceAnchorExecution.cpp"
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/PromotedSequence/RewireIntervalEnd.cpp"

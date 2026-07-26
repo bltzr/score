@@ -344,7 +344,9 @@ static void wireAnchor(
       if(!out)
         continue;
       if(auto in = anchor->inletFor(addr))
+      {
         m.createCable(docModel, *out, *in, Process::CableType::ImmediateGlutton);
+      }
     }
   };
 
@@ -385,7 +387,9 @@ static IntervalModel& convertInto(
   auto& b1 = m.createInterval(scenar, s0.id(), s1.id());
 
   for(auto& id : lanes)
+  {
     m.moveProcess(host, b1, id);
+  }
   if(!lanes.empty())
     m.showRack(b1);
 

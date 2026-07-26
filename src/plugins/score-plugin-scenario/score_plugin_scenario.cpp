@@ -264,6 +264,7 @@ std::vector<score::InterfaceBase*> score_plugin_scenario::factories(
       FW<Process::LayerFactory,
          //         Interpolation::InterpolationLayerFactory,
          Scenario::TempoLayerFactory,
+         Process::LayerFactory_T<Scenario::SequenceAnchor, Process::default_t, Process::default_t>,
          Sequence::SequenceLayerFactory>,
       FW<MoveEventFactoryInterface, MoveEventClassicFactory>,
       FW<DisplayedElementsToolPaletteFactory,

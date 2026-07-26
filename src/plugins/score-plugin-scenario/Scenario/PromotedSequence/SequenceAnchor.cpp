@@ -65,8 +65,13 @@ SequenceAnchor::outletFor(const State::AddressAccessor& addr) const noexcept
 void SequenceAnchor::rebuildPorts(
     const std::vector<int32_t>& savedInletIds, const std::vector<int32_t>& savedOutletIds)
 {
+  // The UI's PortItems must be destroyed before the Port objects they show
+  // (PortItem asserts otherwise). Publishing empty lists first makes the
+  // header/footer tear their items down while the ports are still alive.
   m_inlets.clear();
   m_outlets.clear();
+  inletsChanged();
+  outletsChanged();
 
   std::vector<std::unique_ptr<Process::ValueInlet>> newIns;
   std::vector<std::unique_ptr<Process::ValueOutlet>> newOuts;
