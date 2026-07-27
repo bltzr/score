@@ -8,6 +8,8 @@
 #include <Scenario/Commands/Interval/ResizeInterval.hpp>
 #include <Scenario/Commands/Interval/SetMaxDuration.hpp>
 #include <Scenario/Commands/Interval/SetMinDuration.hpp>
+#include <Scenario/Commands/Interval/SetRigidity.hpp>
+#include <Scenario/PromotedSequence/SetFlexible.hpp>
 #include <Scenario/Document/DisplayedElements/DisplayedElementsPresenter.hpp>
 #include <Scenario/Document/Interval/IntervalDurations.hpp>
 #include <Scenario/Document/Interval/IntervalModel.hpp>
@@ -128,6 +130,13 @@ public:
     m_valueSpin->setTime(m_dur.defaultDuration());
 
     // CHECKBOXES
+    m_flexibleBox = new QCheckBox{tr("Flexible")};
+    m_flexibleBox->setToolTip(
+        tr("A flexible interval keeps playing past its nominal duration until "
+           "its end condition allows it to stop, instead of freezing."));
+    m_flexibleBox->setChecked(!m_dur.isRigid());
+    connect(m_flexibleBox, &QCheckBox::toggled, this, &EditionGrid::on_flexibleToggled);
+
     m_minNonNullBox = new QCheckBox{tr("Min")};
     m_maxFiniteBox = new QCheckBox{tr("Max")};
 
@@ -147,6 +156,7 @@ public:
     m_maxInfinity->hide();
 
     editableGrid->addRow(tr("Duration"), m_valueSpin);
+    editableGrid->addRow(m_flexibleBox);
 
     auto minstack = new QStackedWidget;
     minstack->setSizePolicy(
@@ -224,6 +234,10 @@ public:
 
   void on_modelRigidityChanged(bool b)
   {
+    {
+      QSignalBlocker block{m_flexibleBox};
+      m_flexibleBox->setChecked(!b);
+    }
     if(b)
     {
       m_minNonNullBox->setHidden(b);
@@ -307,6 +321,24 @@ public:
     }
   }
 
+  void on_flexibleToggled(bool val)
+  {
+    if(val == !m_dur.isRigid())
+      return;
+
+    if(val)
+    {
+      // extend-only by default: authored min kept, infinite max; the Min/Max
+      // widgets below can then refine it
+      m_simpleDispatcher.submit(
+          new Scenario::Command::SetFlexible(m_model, m_dur.defaultDuration()));
+    }
+    else
+    {
+      m_simpleDispatcher.submit(new Scenario::Command::SetRigidity(m_model, true));
+    }
+  }
+
   void on_minNonNullToggled(bool val)
   {
     m_minSpin->setVisible(val);
@@ -357,6 +389,7 @@ public:
 
   score::TimeSpinBox* m_valueSpin{};
 
+  QCheckBox* m_flexibleBox{};
   QCheckBox* m_minNonNullBox{};
   QLabel* m_minNull{};
   score::TimeSpinBox* m_minSpin{};
