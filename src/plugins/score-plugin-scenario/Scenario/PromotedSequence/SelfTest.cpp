@@ -43,6 +43,7 @@
 #include <core/presenter/DocumentManager.hpp>
 
 #include <QApplication>
+#include <QFile>
 #include <QElapsedTimer>
 #include <QThread>
 #include <QLocale>
@@ -434,6 +435,13 @@ void runSelfTest()
     JSONObject::Serializer jw;
     doc2->saveAsJson(jw);
     auto jsonArr = jw.toByteArray();
+    if(const auto dir = qEnvironmentVariable("SCORE_PROMOTED_SEQ_SELFTEST_SAVEDIR");
+       !dir.isEmpty())
+    {
+      QFile f{dir + "/promoted-sequences-demo.score"};
+      if(f.open(QIODevice::WriteOnly))
+        f.write(jsonArr);
+    }
     QApplication::processEvents();
     ctx.docManager.forceCloseDocument(ctx, *doc2);
     QApplication::processEvents();
@@ -637,6 +645,16 @@ void runSelfTest()
       }
       qDebug("SEQTEST: stopped");
       Scenario::ScenarioValidityChecker::checkValidity(scenar4);
+    }
+
+    if(const auto dir = qEnvironmentVariable("SCORE_PROMOTED_SEQ_SELFTEST_SAVEDIR");
+       !dir.isEmpty())
+    {
+      JSONObject::Serializer jw4;
+      doc4->saveAsJson(jw4);
+      QFile f{dir + "/autoflex-diamond-demo.score"};
+      if(f.open(QIODevice::WriteOnly))
+        f.write(jw4.toByteArray());
     }
 
     ctx.docManager.forceCloseDocument(ctx, *doc4);
