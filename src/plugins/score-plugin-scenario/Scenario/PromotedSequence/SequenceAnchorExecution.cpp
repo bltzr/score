@@ -14,14 +14,11 @@ class anchor_node final : public ossia::graph_node
 public:
   explicit anchor_node(std::size_t n_params)
   {
-    m_pins.reserve(n_params);
+    // graph_node owns and deletes its ports
     for(std::size_t i = 0; i < n_params; i++)
     {
-      auto in = std::make_unique<ossia::value_inlet>();
-      auto out = std::make_unique<ossia::value_outlet>();
-      m_inlets.push_back(in.get());
-      m_outlets.push_back(out.get());
-      m_pins.emplace_back(std::move(in), std::move(out));
+      m_inlets.push_back(new ossia::value_inlet);
+      m_outlets.push_back(new ossia::value_outlet);
     }
   }
 
@@ -29,19 +26,14 @@ public:
 
   void run(const ossia::token_request&, ossia::exec_state_facade) noexcept override
   {
-    for(auto& [in, out] : m_pins)
+    for(std::size_t i = 0; i < m_inlets.size(); i++)
     {
-      ossia::value_port& ip = **in;
-      ossia::value_port& op = **out;
+      ossia::value_port& ip = *m_inlets[i]->target<ossia::value_port>();
+      ossia::value_port& op = *m_outlets[i]->target<ossia::value_port>();
       for(const auto& tv : ip.get_data())
         op.write_value(tv.value, tv.timestamp);
     }
   }
-
-private:
-  std::vector<std::pair<
-      std::unique_ptr<ossia::value_inlet>, std::unique_ptr<ossia::value_outlet>>>
-      m_pins;
 };
 }
 

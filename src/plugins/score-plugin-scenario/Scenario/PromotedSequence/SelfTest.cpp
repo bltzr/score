@@ -12,6 +12,7 @@
 #include <Automation/Commands/InitAutomation.hpp>
 #include <Automation/AutomationProcessMetadata.hpp>
 
+#include <Scenario/Application/ScenarioActions.hpp>
 #include <Scenario/Application/ScenarioValidity.hpp>
 #include <Scenario/Commands/CommandAPI.hpp>
 #include <Scenario/Commands/Interval/CreateProcessInNewSlot.hpp>
@@ -32,6 +33,7 @@
 #include <Scenario/Sequence/SequenceModel.hpp>
 #include <Scenario/Sequence/Commands/SetSequenceNamespace.hpp>
 
+#include <score/actions/ActionManager.hpp>
 #include <score/plugins/documentdelegate/DocumentDelegateFactory.hpp>
 #include <score/serialization/DataStreamVisitor.hpp>
 
@@ -41,6 +43,8 @@
 #include <core/presenter/DocumentManager.hpp>
 
 #include <QApplication>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QLocale>
 
 #include <csignal>
@@ -580,6 +584,58 @@ void runSelfTest()
       REQUIRE(!A2.duration.isRigid());
       REQUIRE(A2.duration.minDuration() == TimeVal::fromMsecs(2500));
       REQUIRE(!i2b.duration.isRigid());
+      Scenario::ScenarioValidityChecker::checkValidity(scenar4);
+    }
+
+    // ---- execution smoke: build a promoted sequence here too, then play
+    //      the whole document (diamond + sequence) for ~2.5s and stop ----
+    {
+      Id<Scenario::IntervalModel> seqHostId;
+      {
+        Scenario::Command::Macro m{
+            new Scenario::Command::AddProcessInNewSlot, dctx4};
+        auto& box = m.createBox(
+            scenar4, TimeVal::fromMsecs(500), TimeVal::fromMsecs(2000), 0.85);
+        seqHostId = box.id();
+        auto p1 = m.createProcess(
+            box, Metadata<ConcreteKey_k, Automation::ProcessModel>::get(), QString{},
+            QPointF{});
+        REQUIRE(p1);
+        m.submit(new Automation::InitAutomation{
+            *safe_cast<Automation::ProcessModel*>(p1), a1, 0., 1.});
+        m.addLayerInNewSlot(box, *p1);
+        m.commit();
+      }
+      QApplication::processEvents();
+      {
+        auto& host = scenar4.intervals.at(seqHostId);
+        const bool ok = Scenario::PromotedSequence::convertOrExtend(
+            dctx4, scenar4, host, TimeVal::fromMsecs(3500));
+        REQUIRE(ok);
+      }
+      QApplication::processEvents();
+      Scenario::ScenarioValidityChecker::checkValidity(scenar4);
+
+      qDebug("SEQTEST: play...");
+      ctx.actions.action<Actions::PlayGlobal>().action()->trigger();
+      QElapsedTimer t;
+      t.start();
+      while(t.elapsed() < 2500)
+      {
+        QApplication::processEvents();
+        QThread::msleep(5);
+      }
+      auto& host = scenar4.intervals.at(seqHostId);
+      qDebug() << "SEQTEST: host play%:" << host.duration.playPercentage();
+      qDebug("SEQTEST: stop...");
+      ctx.actions.action<Actions::Stop>().action()->trigger();
+      t.restart();
+      while(t.elapsed() < 600)
+      {
+        QApplication::processEvents();
+        QThread::msleep(5);
+      }
+      qDebug("SEQTEST: stopped");
       Scenario::ScenarioValidityChecker::checkValidity(scenar4);
     }
 
