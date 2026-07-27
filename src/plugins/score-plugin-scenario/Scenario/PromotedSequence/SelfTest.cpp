@@ -20,8 +20,11 @@
 #include <Scenario/Document/State/StateModel.hpp>
 #include <Scenario/Process/Algorithms/Accessors.hpp>
 #include <Scenario/Process/ScenarioModel.hpp>
+#include <Scenario/Commands/Scenario/Deletions/RemoveSelection.hpp>
 #include <Scenario/PromotedSequence/PromotedSequence.hpp>
 #include <Scenario/PromotedSequence/SequenceAnchor.hpp>
+#include <Scenario/Sequence/SequenceModel.hpp>
+#include <Scenario/Sequence/Commands/SetSequenceNamespace.hpp>
 
 #include <score/plugins/documentdelegate/DocumentDelegateFactory.hpp>
 #include <score/serialization/DataStreamVisitor.hpp>
@@ -93,6 +96,7 @@ void runSelfTest()
 {
   std::signal(SIGTRAP, seqtestTrapHandler);
   std::signal(SIGABRT, seqtestTrapHandler);
+  std::signal(SIGSEGV, seqtestTrapHandler);
 
   const auto& ctx = score::GUIAppContext();
   auto& doctype = *ctx.interfaces<score::DocumentDelegateList>().begin();
@@ -318,7 +322,144 @@ void runSelfTest()
         Scenario::ScenarioValidityChecker::checkValidity(scenar2);
       }
     }
+    // ---- migration: old encapsulated Sequence -> promoted ----
+    {
+      auto& dctx2 = doc2->context();
+      Id<Scenario::IntervalModel> oldHostId;
+      const Sequence::SequenceModel* oldSeq{};
+      {
+        Scenario::Command::Macro m{
+            new Scenario::Command::AddProcessInNewSlot, dctx2};
+        auto& box = m.createBox(
+            scenar2, TimeVal::fromMsecs(25000), TimeVal::fromMsecs(29000), 0.3);
+        oldHostId = box.id();
+        auto proc = m.createProcess(
+            box, Metadata<ConcreteKey_k, Sequence::SequenceModel>::get(), QString{},
+            QPointF{});
+        REQUIRE(proc);
+        if(proc)
+        {
+          auto& seq = *safe_cast<Sequence::SequenceModel*>(proc);
+          m.submit(new Sequence::Command::AddSequenceParameter{seq, a1});
+          m.submit(new Sequence::Command::AddSequenceParameter{seq, a2});
+          oldSeq = &seq;
+        }
+        m.commit();
+      }
+      QApplication::processEvents();
+
+      if(oldSeq)
+      {
+        auto& oldHost = scenar2.intervals.at(oldHostId);
+        REQUIRE(oldSeq->intervals.size() == 1);   // one internal section
+
+        const bool ok = Scenario::PromotedSequence::convertOrExtend(
+            dctx2, scenar2, oldHost, TimeVal::fromMsecs(32000));
+        REQUIRE(ok);
+        QApplication::processEvents();
+
+        auto st = Scenario::PromotedSequence::locate(scenar2, oldHost);
+        REQUIRE(st.has_value());
+        if(st)
+        {
+          REQUIRE(st->sections.size() == 2); // migrated + extension
+          REQUIRE(countLanes(*st->sections[0]) == 2);
+          REQUIRE(countLanes(*st->sections[1]) == 2);
+        }
+        // the old process is gone, replaced by the anchor
+        bool oldSeqStillThere = false;
+        for(auto& p : oldHost.processes)
+          if(qobject_cast<const Sequence::SequenceModel*>(&p))
+            oldSeqStillThere = true;
+        REQUIRE(!oldSeqStillThere);
+        REQUIRE(anchorOf(oldHost));
+        REQUIRE(!oldHost.duration.isRigid());
+        Scenario::ScenarioValidityChecker::checkValidity(scenar2);
+
+        // undo restores the old encapsulated process intact
+        doc2->commandStack().undo();
+        QApplication::processEvents();
+        bool oldSeqBack = false;
+        for(auto& p : oldHost.processes)
+          if(qobject_cast<const Sequence::SequenceModel*>(&p))
+            oldSeqBack = true;
+        REQUIRE(oldSeqBack);
+        REQUIRE(!anchorOf(oldHost));
+        REQUIRE(!Scenario::PromotedSequence::locate(scenar2, oldHost));
+        Scenario::ScenarioValidityChecker::checkValidity(scenar2);
+
+        doc2->commandStack().redo();
+        QApplication::processEvents();
+        REQUIRE(Scenario::PromotedSequence::locate(scenar2, oldHost).has_value());
+        Scenario::ScenarioValidityChecker::checkValidity(scenar2);
+      }
+    }
+
+    // ---- delete a section + undo (RemoveSelection landmine) ----
+    if(host2)
+    {
+      auto st = Scenario::PromotedSequence::locate(scenar2, *host2);
+      REQUIRE(st.has_value());
+      if(st)
+      {
+        auto* lastSection = st->sections.back();
+        Selection sel;
+        sel.append(lastSection);
+        Scenario::Command::RemoveSelection cmd(scenar2, sel);
+        cmd.redo(doc2->context());
+        QApplication::processEvents();
+        Scenario::ScenarioValidityChecker::checkValidity(scenar2);
+        cmd.undo(doc2->context());
+        QApplication::processEvents();
+        Scenario::ScenarioValidityChecker::checkValidity(scenar2);
+        // the sequence must be recognizable again after undo
+        auto st2 = Scenario::PromotedSequence::locate(scenar2, *host2);
+        REQUIRE(st2.has_value());
+        if(st2)
+          REQUIRE(st2->sections.size() == st->sections.size());
+      }
+    }
+
+    // ---- JSON round-trip ----
+    JSONObject::Serializer jw;
+    doc2->saveAsJson(jw);
+    auto jsonArr = jw.toByteArray();
+    QApplication::processEvents();
     ctx.docManager.forceCloseDocument(ctx, *doc2);
+    QApplication::processEvents();
+    auto doc3 = ctx.docManager.loadDocument(
+        ctx, QString("promoted-test-json"), jsonArr, JSONObject::type(), doctype);
+    // let the presenter's queued init events (minimap zoom...) fire before
+    // we do anything else, so closing the doc later doesn't deliver them
+    // into a torn-down presenter
+    for(int i = 0; i < 10; i++)
+      QApplication::processEvents();
+    REQUIRE(doc3);
+    if(doc3)
+    {
+      auto& sdm3 = static_cast<Scenario::ScenarioDocumentModel&>(
+          doc3->model().modelDelegate());
+      auto& scenar3 = static_cast<Scenario::ProcessModel&>(
+          *sdm3.baseInterval().processes.begin());
+      int promotedCount = 0;
+      for(auto& itv : scenar3.intervals)
+      {
+        if(anchorOf(itv))
+        {
+          promotedCount++;
+          auto st = Scenario::PromotedSequence::locate(
+              scenar3, const_cast<Scenario::IntervalModel&>(itv));
+          REQUIRE(st.has_value());
+        }
+      }
+      // the converted host, the created-from-state host, the migrated host
+      REQUIRE(promotedCount == 3);
+      qDebug("SEQTEST: json checkValidity...");
+      Scenario::ScenarioValidityChecker::checkValidity(scenar3);
+      qDebug("SEQTEST: json close...");
+      ctx.docManager.forceCloseDocument(ctx, *doc3);
+      qDebug("SEQTEST: json closed");
+    }
   }
 
   if(failures == 0)
