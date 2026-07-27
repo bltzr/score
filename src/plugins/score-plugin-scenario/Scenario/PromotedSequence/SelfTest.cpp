@@ -21,6 +21,12 @@
 #include <Scenario/Process/Algorithms/Accessors.hpp>
 #include <Scenario/Process/ScenarioModel.hpp>
 #include <Scenario/Commands/Scenario/Deletions/RemoveSelection.hpp>
+#include <Scenario/Commands/TimeSync/AddTrigger.hpp>
+#include <Scenario/Commands/Scenario/Creations/CreateEvent_State.hpp>
+#include <Scenario/Commands/TimeSync/SplitTimeSync.hpp>
+#include <Scenario/Document/Event/EventModel.hpp>
+#include <Scenario/Document/TimeSync/TimeSyncModel.hpp>
+#include <Scenario/Process/Algorithms/ParallelBranches.hpp>
 #include <Scenario/PromotedSequence/PromotedSequence.hpp>
 #include <Scenario/PromotedSequence/SequenceAnchor.hpp>
 #include <Scenario/Sequence/SequenceModel.hpp>
@@ -460,6 +466,125 @@ void runSelfTest()
       ctx.docManager.forceCloseDocument(ctx, *doc3);
       qDebug("SEQTEST: json closed");
     }
+  }
+
+  // ---- auto-flex diamonds (wait-absorption, ParallelBranches) ----
+  {
+    auto doc4 = ctx.docManager.newDocument(
+        ctx, Id<score::DocumentModel>{1004}, doctype);
+    REQUIRE(doc4);
+    QApplication::processEvents();
+    auto& sdm4
+        = static_cast<Scenario::ScenarioDocumentModel&>(doc4->model().modelDelegate());
+    auto& scenar4
+        = static_cast<Scenario::ProcessModel&>(*sdm4.baseInterval().processes.begin());
+    auto& dctx4 = doc4->context();
+
+    // Diamond: A (1000..5000) in parallel with i1(1000ms) -> boxB(1500ms,
+    // triggered end) -> i2(1500ms), all between A's two syncs.
+    Id<Scenario::IntervalModel> aId, i2Id;
+    {
+      Scenario::Command::Macro m{new Scenario::Command::AddProcessInNewSlot, dctx4};
+      auto& boxA = m.createBox(
+          scenar4, TimeVal::fromMsecs(1000), TimeVal::fromMsecs(5000), 0.2);
+      aId = boxA.id();
+      auto& boxB = m.createBox(
+          scenar4, TimeVal::fromMsecs(2000), TimeVal::fromMsecs(3500), 0.6);
+
+      auto& aStart = Scenario::startState(boxA, scenar4);
+      auto& sB0 = m.createState(scenar4, aStart.eventId(), 0.5);
+      m.createInterval(scenar4, sB0.id(), Scenario::startState(boxB, scenar4).id());
+
+      m.submit(new Scenario::Command::AddTrigger<Scenario::ProcessModel>(
+          Scenario::endTimeSync(boxB, scenar4)));
+
+      // i2 ends on its own event of the shared sync, so SplitTimeSync can
+      // later separate the two lanes (splitting moves whole events)
+      auto& sharedSync = Scenario::endTimeSync(boxA, scenar4);
+      auto evCmd = new Scenario::Command::CreateEvent_State{
+          scenar4, sharedSync.id(), 0.5};
+      m.submit(evCmd);
+      auto& i2 = m.createInterval(
+          scenar4, Scenario::endState(boxB, scenar4).id(), evCmd->createdState());
+      i2Id = i2.id();
+      m.commit();
+    }
+    QApplication::processEvents();
+    Scenario::ScenarioValidityChecker::checkValidity(scenar4);
+
+    auto& A = scenar4.intervals.at(aId);
+    auto& i2 = scenar4.intervals.at(i2Id);
+
+    // A spans the diamond -> fully elastic; its min is the PERT floor of the
+    // parallel branch: 1000 + 0 (boxB is trigger-flexed, masked min 0) + 1500.
+    REQUIRE(!A.duration.isRigid());
+    REQUIRE(A.duration.isMaxInfinite());
+    REQUIRE(!A.duration.isMinNull());
+    REQUIRE(A.duration.minDuration() == TimeVal::fromMsecs(2500));
+    // i2 is structural but faces the elastic A -> extend-only, min = its own
+    // default duration.
+    REQUIRE(!i2.duration.isRigid());
+    REQUIRE(i2.duration.isMaxInfinite());
+    REQUIRE(i2.duration.minDuration() == TimeVal::fromMsecs(1500));
+
+    // one undo removes the whole diamond, redo brings the flex back
+    doc4->commandStack().undo();
+    QApplication::processEvents();
+    REQUIRE(scenar4.intervals.find(aId) == scenar4.intervals.end());
+    Scenario::ScenarioValidityChecker::checkValidity(scenar4);
+    doc4->commandStack().redo();
+    QApplication::processEvents();
+    {
+      auto& A2 = scenar4.intervals.at(aId);
+      REQUIRE(!A2.duration.isRigid());
+      REQUIRE(A2.duration.minDuration() == TimeVal::fromMsecs(2500));
+    }
+    Scenario::ScenarioValidityChecker::checkValidity(scenar4);
+
+    // deleting the closing edge dissolves the diamond: A gets its authored
+    // rigidity back, and undo restores the elastic state
+    {
+      auto& A2 = scenar4.intervals.at(aId);
+      auto& i2b = scenar4.intervals.at(i2Id);
+      Selection sel;
+      sel.append(&i2b);
+      Scenario::Command::RemoveSelection cmd(scenar4, sel);
+      cmd.redo(dctx4);
+      QApplication::processEvents();
+      REQUIRE(A2.duration.isRigid());
+      REQUIRE(A2.duration.minDuration() == A2.duration.defaultDuration());
+      Scenario::ScenarioValidityChecker::checkValidity(scenar4);
+      cmd.undo(dctx4);
+      QApplication::processEvents();
+      REQUIRE(!A2.duration.isRigid());
+      REQUIRE(A2.duration.minDuration() == TimeVal::fromMsecs(2500));
+      REQUIRE(!scenar4.intervals.at(i2Id).duration.isRigid());
+      Scenario::ScenarioValidityChecker::checkValidity(scenar4);
+    }
+
+    // splitting the shared sync dissolves it too, symmetrically
+    {
+      auto& A2 = scenar4.intervals.at(aId);
+      auto& i2b = scenar4.intervals.at(i2Id);
+      auto& sharedSync = Scenario::endTimeSync(A2, scenar4);
+      auto& i2EndState = Scenario::endState(i2b, scenar4);
+      Scenario::Command::SplitTimeSync cmd(
+          sharedSync, {i2EndState.eventId()});
+      cmd.redo(dctx4);
+      QApplication::processEvents();
+      REQUIRE(A2.duration.isRigid());
+      REQUIRE(i2b.duration.isRigid());
+      Scenario::ScenarioValidityChecker::checkValidity(scenar4);
+      cmd.undo(dctx4);
+      QApplication::processEvents();
+      REQUIRE(!A2.duration.isRigid());
+      REQUIRE(A2.duration.minDuration() == TimeVal::fromMsecs(2500));
+      REQUIRE(!i2b.duration.isRigid());
+      Scenario::ScenarioValidityChecker::checkValidity(scenar4);
+    }
+
+    ctx.docManager.forceCloseDocument(ctx, *doc4);
+    QApplication::processEvents();
   }
 
   if(failures == 0)

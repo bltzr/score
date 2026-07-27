@@ -2,6 +2,8 @@
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include "StandardCreationPolicy.hpp"
 
+#include <Scenario/Process/Algorithms/ParallelBranches.hpp>
+
 #include <Process/TimeValue.hpp>
 
 #include <Scenario/Document/Event/EventModel.hpp>
@@ -155,6 +157,14 @@ IntervalModel& ScenarioCreate<IntervalModel>::redo(
     interval->duration.setMaxDuration(TimeVal::fromMsecs(1.2 * dur.msec()));
     interval->duration.setMinNull(true);
     interval->duration.setMaxInfinite(true);
+  }
+  else if(!graphal)
+  {
+    // Closing an edge onto a sync that already has other incoming branches
+    // creates a diamond: absorb waits instead of freezing (see
+    // ParallelBranches.hpp). Undo is the removal of this interval.
+    ParallelBranches::applyFlavor(
+        *interval, ParallelBranches::flavorFor(s, *interval));
   }
 
   return *interval;

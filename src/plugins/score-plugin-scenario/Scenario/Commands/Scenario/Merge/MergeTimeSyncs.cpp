@@ -3,6 +3,8 @@
 #include <Process/TimeValueSerialization.hpp>
 
 #include <Scenario/Application/ScenarioValidity.hpp>
+#include <Scenario/Process/Algorithms/Accessors.hpp>
+#include <Scenario/Process/Algorithms/ParallelBranches.hpp>
 
 #include <score/document/DocumentContext.hpp>
 #include <score/model/EntitySerialization.hpp>
@@ -46,6 +48,9 @@ MergeTimeSyncs::~MergeTimeSyncs()
 void MergeTimeSyncs::undo(const score::DocumentContext& ctx) const
 {
   auto& scenar = m_scenarioPath.find(ctx);
+
+  for(auto it = m_flexCmds.rbegin(); it != m_flexCmds.rend(); ++it)
+    it->undo(ctx);
 
   auto& globalTn = scenar.timeSync(m_destinationTnId);
 
@@ -92,6 +97,37 @@ void MergeTimeSyncs::redo(const score::DocumentContext& ctx) const
   destinationTn.setExpression(movingTn.expression());
 
   scenar.timeSyncs.remove(m_movingTnId);
+
+  // The merged sync may now be a diamond convergence: flex the lanes that
+  // became waitable (two passes — a lane flexed in the first pass can make
+  // its siblings waitable in turn).
+  if(!m_flexComputed)
+  {
+    m_flexComputed = true;
+    if(!destinationTn.active())
+    {
+      for(int pass = 0; pass < 2; pass++)
+      {
+        for(const auto& pid : previousNonGraphIntervals(destinationTn, scenar))
+        {
+          auto& p = scenar.intervals.at(pid);
+          if(!p.duration.isRigid())
+            continue;
+          auto f = ParallelBranches::flavorFor(scenar, p);
+          if(f.flavor != ParallelBranches::Flavor::Rigid)
+          {
+            m_flexCmds.emplace_back(p, f.min);
+            m_flexCmds.back().redo(ctx);
+          }
+        }
+      }
+    }
+  }
+  else
+  {
+    for(const auto& cmd : m_flexCmds)
+      cmd.redo(ctx);
+  }
 }
 
 void MergeTimeSyncs::update(
@@ -104,6 +140,9 @@ void MergeTimeSyncs::serializeImpl(DataStreamInput& s) const
 {
   s << m_scenarioPath << m_movingTnId << m_destinationTnId << m_serializedTimeSync
     << m_moveCommand->serialize() << m_targetTrigger << m_targetTriggerActive;
+  s << m_flexComputed << (int32_t)m_flexCmds.size();
+  for(const auto& cmd : m_flexCmds)
+    s << cmd.serialize();
 }
 
 void MergeTimeSyncs::deserializeImpl(DataStreamOutput& s)
@@ -115,6 +154,17 @@ void MergeTimeSyncs::deserializeImpl(DataStreamOutput& s)
 
   m_moveCommand = new MoveEvent<GoodOldDisplacementPolicy>{};
   m_moveCommand->deserialize(cmd);
+  bool computed{};
+  int32_t n{};
+  s >> computed >> n;
+  m_flexComputed = computed;
+  m_flexCmds.resize(n);
+  for(int32_t i = 0; i < n; i++)
+  {
+    QByteArray a;
+    s >> a;
+    m_flexCmds[i].deserialize(a);
+  }
 }
 }
 }

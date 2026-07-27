@@ -4,6 +4,7 @@
 
 #include <Scenario/Commands/Scenario/Displacement/MoveEvent.hpp>
 #include <Scenario/Commands/ScenarioCommandFactory.hpp>
+#include <Scenario/PromotedSequence/SetFlexible.hpp>
 #include <Scenario/Document/TimeSync/TimeSyncModel.hpp>
 #include <Scenario/Process/Algorithms/GoodOldDisplacementPolicy.hpp>
 #include <Scenario/Process/Algorithms/StandardDisplacementPolicy.hpp>
@@ -52,6 +53,11 @@ private:
   MoveEvent<GoodOldDisplacementPolicy>* m_moveCommand{};
   State::Expression m_targetTrigger;
   bool m_targetTriggerActive{};
+
+  // Wait-absorption: the destination sync may gain incoming branches and
+  // become a diamond (see ParallelBranches.hpp). Captured on first redo.
+  mutable bool m_flexComputed{};
+  mutable std::vector<SetFlexible> m_flexCmds;
 };
 }
 }

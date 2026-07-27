@@ -117,6 +117,17 @@ RemoveSelection::RemoveSelection(const Scenario::ProcessModel& scenar, Selection
 
   sel.removeDuplicates();
 
+  // Wait-absorption bookkeeping: which intervals disappear, to tell which
+  // diamonds dissolve (see ParallelBranches.hpp).
+  std::vector<Id<IntervalModel>> removedItvIds;
+  for(const QPointer<IdentifiedObjectAbstract>& ptr : sel)
+    if(auto itv = dynamic_cast<const IntervalModel*>(ptr.data()))
+      removedItvIds.push_back(itv->id());
+  auto isRemoved = [&](const Id<IntervalModel>& id) {
+    return std::find(removedItvIds.begin(), removedItvIds.end(), id)
+           != removedItvIds.end();
+  };
+
   QObjectList l;
   l.reserve(sel.size());
   for(const QPointer<IdentifiedObjectAbstract>& p : sel)
@@ -157,9 +168,17 @@ RemoveSelection::RemoveSelection(const Scenario::ProcessModel& scenar, Selection
         DataStream::Serializer s2{&arr};
         s2.readFrom(*ts);
         m_cleanedTimeSyncs.push_back({ts->id(), arr});
+        // Cleaning this sync only removes its trigger; if a diamond
+        // survives the removal, its lanes must stay flexible to keep
+        // absorbing waits (see ParallelBranches.hpp).
+        int surviving = 0;
+        for(const auto& sibId : previousNonGraphIntervals(*ts, scenar))
+          if(!isRemoved(sibId))
+            surviving++;
         for(const auto& cstrId : intervalsBeforeTimeSync(scenar, ts->id()))
         {
-          m_cmds_set_rigidity.emplace_back(scenar.interval(cstrId), true);
+          if(isRemoved(cstrId) || surviving < 2)
+            m_cmds_set_rigidity.emplace_back(scenar.interval(cstrId), true);
         }
       }
     }
@@ -179,6 +198,28 @@ RemoveSelection::RemoveSelection(const Scenario::ProcessModel& scenar, Selection
       s.readFrom(*interval);
       m_removedIntervals.push_back({interval->id(), arr});
     }
+  }
+
+  // Diamond dissolution: if the removal leaves a formerly multi-incoming,
+  // trigger-less sync with a single flexible lane, restore that lane's
+  // authored rigidity (stateless inverse of the wait-absorption rule).
+  for(const auto& remId : removedItvIds)
+  {
+    auto& rem = scenar.interval(remId);
+    auto& tn = Scenario::endTimeSync(rem, scenar);
+    if(sel.contains(&tn) || tn.active())
+      continue;
+    const IntervalModel* survivor{};
+    int surviving = 0;
+    for(const auto& sibId : previousNonGraphIntervals(tn, scenar))
+    {
+      if(isRemoved(sibId))
+        continue;
+      surviving++;
+      survivor = &scenar.interval(sibId);
+    }
+    if(surviving == 1 && !survivor->duration.isRigid() && !survivor->graphal())
+      m_cmds_set_rigidity.emplace_back(*survivor, true);
   }
 }
 

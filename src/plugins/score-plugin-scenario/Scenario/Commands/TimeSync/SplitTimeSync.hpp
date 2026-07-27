@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Scenario/Commands/ScenarioCommandFactory.hpp>
+#include <Scenario/Commands/Interval/SetRigidity.hpp>
 
 #include <score/command/Command.hpp>
 #include <score/model/Identifier.hpp>
@@ -37,6 +38,12 @@ private:
 
   Id<TimeSyncModel> m_originalTimeSyncId;
   Id<TimeSyncModel> m_newTimeSyncId;
+
+  // Splitting can dissolve a diamond: lanes that are no longer waitable get
+  // their authored rigidity back (see ParallelBranches.hpp). Captured on
+  // first redo.
+  mutable bool m_rigidComputed{};
+  mutable std::vector<SetRigidity> m_rigidCmds;
 };
 
 class SCORE_PLUGIN_SCENARIO_EXPORT SplitWholeSync final : public score::Command
@@ -57,6 +64,9 @@ private:
 
   Id<TimeSyncModel> m_originalTimeSync;
   std::vector<Id<TimeSyncModel>> m_newTimeSyncs;
+
+  mutable bool m_rigidComputed{};
+  mutable std::vector<SetRigidity> m_rigidCmds;
 };
 }
 }

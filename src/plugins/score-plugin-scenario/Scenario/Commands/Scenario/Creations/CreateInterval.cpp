@@ -8,6 +8,8 @@
 #include <Scenario/Document/ScenarioDocument/ScenarioDocumentModel.hpp>
 #include <Scenario/Document/State/StateModel.hpp>
 #include <Scenario/Process/Algorithms/StandardCreationPolicy.hpp>
+#include <Scenario/Process/Algorithms/Accessors.hpp>
+#include <Scenario/Process/Algorithms/ParallelBranches.hpp>
 #include <Scenario/Process/ScenarioModel.hpp>
 
 #include <score/model/EntityMap.hpp>
@@ -49,6 +51,9 @@ void CreateInterval::undo(const score::DocumentContext& ctx) const
 {
   auto& scenar = m_path.find(ctx);
 
+  for(auto it = m_flexCmds.rbegin(); it != m_flexCmds.rend(); ++it)
+    it->undo(ctx);
+
   ScenarioCreate<IntervalModel>::undo(m_createdIntervalId, scenar);
   if(m_startStatePos != -1)
   {
@@ -73,18 +78,64 @@ void CreateInterval::redo(const score::DocumentContext& ctx) const
   itv.metadata().setName(m_createdName);
 
   itv.requestHeightChange(est.heightPercentage());
+
+  // If this edge closed a diamond, the pre-existing lanes at the end sync
+  // may now be waitable: flex them (two passes — a lane flexed in the first
+  // pass can make its siblings waitable in turn).
+  if(!m_flexComputed)
+  {
+    m_flexComputed = true;
+    auto& tn = Scenario::endTimeSync(itv, scenar);
+    if(!tn.active())
+    {
+      for(int pass = 0; pass < 2; pass++)
+      {
+        for(const auto& pid : previousNonGraphIntervals(tn, scenar))
+        {
+          auto& p = scenar.intervals.at(pid);
+          if(!p.duration.isRigid())
+            continue;
+          auto f = ParallelBranches::flavorFor(scenar, p);
+          if(f.flavor != ParallelBranches::Flavor::Rigid)
+          {
+            m_flexCmds.emplace_back(p, f.min);
+            m_flexCmds.back().redo(ctx);
+          }
+        }
+      }
+    }
+  }
+  else
+  {
+    for(const auto& cmd : m_flexCmds)
+      cmd.redo(ctx);
+  }
 }
 
 void CreateInterval::serializeImpl(DataStreamInput& s) const
 {
   s << m_path << m_createdName << m_createdIntervalId << m_startStateId << m_endStateId
     << m_startStatePos << m_endStatePos << m_graphal;
+  s << m_flexComputed << (int32_t)m_flexCmds.size();
+  for(const auto& cmd : m_flexCmds)
+    s << cmd.serialize();
 }
 
 void CreateInterval::deserializeImpl(DataStreamOutput& s)
 {
   s >> m_path >> m_createdName >> m_createdIntervalId >> m_startStateId >> m_endStateId
       >> m_startStatePos >> m_endStatePos >> m_graphal;
+  bool computed{};
+  int32_t n{};
+  s >> computed >> n;
+  m_flexComputed = computed;
+  m_flexCmds.resize(n);
+  for(int32_t i = 0; i < n; i++)
+  {
+    QByteArray a;
+    s >> a;
+    m_flexCmds[i].deserialize(a);
+  }
 }
 }
 }

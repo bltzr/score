@@ -293,6 +293,7 @@ set(HDRS
   "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/ConstrainedDisplacementPolicy.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/GoodOldDisplacementPolicy.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/ProcessPolicy.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/ParallelBranches.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/StandardCreationPolicy.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/StandardDisplacementPolicy.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/StandardRemovalPolicy.hpp"
@@ -605,6 +606,7 @@ set(SRCS ${SRCS}
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Document/CommentBlock/CommentBlockPresenter.cpp"
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Document/CommentBlock/CommentBlockView.cpp"
 
+"${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/ParallelBranches.cpp"
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/StandardCreationPolicy.cpp"
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/GoodOldDisplacementPolicy.cpp"
 "${CMAKE_CURRENT_SOURCE_DIR}/Scenario/Process/Algorithms/ConstrainedDisplacementPolicy.cpp"

@@ -1,5 +1,6 @@
 #pragma once
 #include <Scenario/Commands/ScenarioCommandFactory.hpp>
+#include <Scenario/PromotedSequence/SetFlexible.hpp>
 
 #include <score/command/Command.hpp>
 #include <score/model/Identifier.hpp>
@@ -62,6 +63,12 @@ private:
   double m_startStatePos{-1};
   double m_endStatePos{-1};
   bool m_graphal{};
+
+  // Wait-absorption for pre-existing lanes when this interval closes a
+  // diamond (see ParallelBranches.hpp). Captured on first redo, once the
+  // new edge is actually in the graph.
+  mutable bool m_flexComputed{};
+  mutable std::vector<SetFlexible> m_flexCmds;
 };
 }
 }
