@@ -10,8 +10,10 @@
 #include <Crousti/ProcessModelPortInit.hpp>
 #include <Dataflow/Commands/CableHelpers.hpp>
 
+#include <score/document/DocumentInterface.hpp>
 #include <score/serialization/MapSerialization.hpp>
 #include <score/tools/std/HashMap.hpp>
+#include <score/tools/FilePath.hpp>
 
 #include <core/document/Document.hpp>
 
@@ -200,14 +202,18 @@ private:
         }
       }
 
-      auto pathOf = [](Process::ControlInlet* p) -> QString {
+      auto pathOf = [this](Process::ControlInlet* p) -> QString {
         if(!p)
           return {};
         if(auto s = p->value().target<std::string>())
         {
+          // FolderChooser/file pickers store <PROJECT>:/<LIBRARY>: tokens (or
+          // document-relative paths) for portability; resolve back to a real
+          // filesystem path before treating it as one.
+          auto path = QString::fromStdString(*s);
+          path = score::locateFilePath(path, score::IDocument::documentContext(*this));
           // The sibling port may name a folder, or a file (e.g. a sound-file
           // port): in the latter case list the file's containing folder.
-          auto path = QString::fromStdString(*s);
           if(QFileInfo fi{path}; fi.isFile())
             return fi.absolutePath();
           return path;
