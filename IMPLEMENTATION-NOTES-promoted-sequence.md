@@ -177,3 +177,65 @@ Branch `deeper-sequence-exploration`, worktree
 `~/dev/score/deeper-sequence-exploration`, build dir `build/` (own binary:
 `build/score`). Design doc: `DESIGN-ises-in-parent-scenario.md` (§7b/§7c for
 the diamond semantics this builds on).
+
+## Self-test harness (2026-07-26, updated same day)
+
+`SCORE_PROMOTED_SEQ_SELFTEST=1 build/score` runs a structural test inside the
+real app and exits with 0 (all green) / 1 (assertion failures) / 3 (crash,
+with a backtrace on stderr). 99 assertions, `ScenarioValidityChecker` after
+every phase:
+
+- convert → auto-extend → extend; undo ×2 / redo ×2 (MoveEvent snapshot
+  ordering holds); byte-array save/close/reload; create-from-state.
+- migration: an old encapsulated Sequence process (built via commands) is
+  converted by the same blue-+ path; undo restores the old process exactly.
+- deleting the last section + undo (RemoveSelection landmine) round-trips.
+- JSON save/reload: all three promoted hosts locate correctly.
+- auto-flex diamonds (see below): elastic PERT min, extend-only closing edge,
+  macro undo, dissolution by deletion and by sync-split, all with undo.
+
+It found and fixed two crashes before any GUI session: the anchor's missing
+LayerFactory registration, and rebuildPorts destroying Ports before their
+PortItems (publish empty port lists first). The risks previously listed as
+"untested: undo of extend, save/reload" are now machine-verified; still
+GUI-only: slot-mirror feel during drags, stacking-rule visuals, cabling UX.
+
+## Auto-flex diamonds (design §7c V1, @d239acd40)
+
+The general wait-absorption rule now applies to ALL diamonds, not just
+sequences: closing an edge onto a sync that already has incoming branches
+flexes whatever can be made to wait (elastic redundant edges get the PERT
+floor of their parallel structure as min; structural lanes facing a
+nondeterministic sibling become extend-only, authored min kept). Deterministic
+diamonds stay rigid. Dissolution (deleting a branch, splitting the shared
+sync) statelessly restores authored rigidity. `Scenario/Process/Algorithms/
+ParallelBranches.{hpp,cpp}` holds the predicates; hooks in
+StandardCreationPolicy, CreateInterval, MergeTimeSyncs, RemoveSelection,
+SplitTimeSync.
+
+Known V1 limits (from the design doc, deliberate):
+- Reverting an elastic lane loses a hand-authored min (restore is
+  min=max=default); the doc's "flexibility as a mask over stored values"
+  refinement is not implemented yet.
+- Sections of a promoted sequence may pick up extend-only flavor when the
+  extension edge closes into the final sync — semantically inert (the host's
+  min gates the sync) but they may *display* as flexible; judge in GUI.
+- No execution-time floor recompute yet (stale mins after sibling edits are
+  display-only); no manual flexible-toggle in the inspector yet.
+
+## Second evening pass (2026-07-26, @01c0f172b)
+
+- **Execution smoke-test** added to the self-test (plays the whole document
+  ~2.5s via PlayGlobal, then stops). It caught **crash #3**: anchor_node
+  double-freed its ossia ports at exec teardown (unique_ptrs + base-class
+  ownership) — fixed; pressing stop after playing a promoted sequence would
+  have crashed. Caveat: no audio callback in the sandboxed run, so the
+  transport doesn't advance — actual audible playback is still yours to test.
+- **Demo scores**: open `tests/demos/promoted-sequences-demo.score` (three
+  promoted sequences: converted / created-from-state / migrated) and
+  `tests/demos/autoflex-diamond-demo.score` (triggered diamond, elastic +
+  extend-only lanes). Regenerate anytime with
+  `SCORE_PROMOTED_SEQ_SELFTEST_SAVEDIR=<dir>` on a self-test run.
+- **Inspector "Flexible" checkbox** (§7c i): duration section, toggles
+  SetFlexible (extend-only: authored min, ∞ max) / SetRigidity(true).
+  Tracks model changes (trigger, auto-flex). GUI-untested — look at it.
